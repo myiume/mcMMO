@@ -1,26 +1,27 @@
 package com.gmail.nossr50.commands.experience;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-
+import com.gmail.nossr50.datatypes.experience.XPGainReason;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.datatypes.player.PlayerProfile;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.EventUtils;
+import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.commands.CommandUtils;
+import com.gmail.nossr50.util.player.UserManager;
+import com.google.common.collect.ImmutableList;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 import org.bukkit.util.StringUtil;
+import org.jetbrains.annotations.NotNull;
 
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.player.PlayerProfile;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.EventUtils;
-import com.gmail.nossr50.util.Permissions;
-import com.gmail.nossr50.util.commands.CommandUtils;
-import com.gmail.nossr50.util.player.UserManager;
-
-import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * This class mirrors the structure of ExperienceCommand, except the
@@ -28,7 +29,8 @@ import com.google.common.collect.ImmutableList;
  */
 public class SkillresetCommand implements TabExecutor {
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, String[] args) {
+        PrimarySkillType skill;
         switch (args.length) {
             case 1:
                 if (CommandUtils.noConsoleUsage(sender)) {
@@ -44,7 +46,14 @@ public class SkillresetCommand implements TabExecutor {
                     return true;
                 }
 
-                editValues((Player) sender, UserManager.getPlayer(sender.getName()).getProfile(), SkillType.getSkill(args[0]));
+                if (args[0].equalsIgnoreCase("all")) {
+                    skill = null;
+                }
+                else {
+                    skill = PrimarySkillType.getSkill(args[0]);
+                }
+
+                editValues((Player) sender, UserManager.getPlayer(sender.getName()).getProfile(), skill);
                 return true;
 
             case 2:
@@ -57,23 +66,33 @@ public class SkillresetCommand implements TabExecutor {
                     return true;
                 }
 
-                SkillType skill;
                 if (args[1].equalsIgnoreCase("all")) {
                     skill = null;
                 }
                 else {
-                    skill = SkillType.getSkill(args[1]);
+                    skill = PrimarySkillType.getSkill(args[1]);
                 }
 
                 String playerName = CommandUtils.getMatchedPlayerName(args[0]);
-                McMMOPlayer mcMMOPlayer = UserManager.getPlayer(playerName, true);
+                McMMOPlayer mcMMOPlayer = UserManager.getOfflinePlayer(playerName);
 
                 // If the mcMMOPlayer doesn't exist, create a temporary profile and check if it's present in the database. If it's not, abort the process.
                 if (mcMMOPlayer == null) {
-                    PlayerProfile profile = mcMMO.getDatabaseManager().loadPlayerProfile(playerName, false);
+                    UUID uuid = null;
+                    OfflinePlayer player = mcMMO.p.getServer().getOfflinePlayer(playerName);
+                    uuid = player.getUniqueId();
 
+                    PlayerProfile profile = mcMMO.getDatabaseManager().loadPlayerProfile(uuid, playerName);
+
+                    //Check loading by UUID
                     if (CommandUtils.unloadedProfile(sender, profile)) {
-                        return true;
+                        //Didn't find it by UUID so try to find it by name
+                        profile = mcMMO.getDatabaseManager().loadPlayerProfile(playerName);
+
+                        //Check if it was present in DB
+                        if(CommandUtils.unloadedProfile(sender, profile)) {
+                            return true;
+                        }
                     }
 
                     editValues(null, profile, skill);
@@ -91,30 +110,30 @@ public class SkillresetCommand implements TabExecutor {
     }
 
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, String[] args) {
         switch (args.length) {
             case 1:
-                Set<String> playerNames = UserManager.getPlayerNames();
-                return StringUtil.copyPartialMatches(args[0], playerNames, new ArrayList<String>(playerNames.size()));
+                List<String> playerNames = CommandUtils.getOnlinePlayerNames(sender);
+                return StringUtil.copyPartialMatches(args[0], playerNames, new ArrayList<>(playerNames.size()));
             case 2:
-                return StringUtil.copyPartialMatches(args[1], SkillType.SKILL_NAMES, new ArrayList<String>(SkillType.SKILL_NAMES.size()));
+                return StringUtil.copyPartialMatches(args[1], PrimarySkillType.SKILL_NAMES, new ArrayList<>(PrimarySkillType.SKILL_NAMES.size()));
             default:
                 return ImmutableList.of();
         }
     }
 
-    protected void handleCommand(Player player, PlayerProfile profile, SkillType skill) {
+    protected void handleCommand(Player player, PlayerProfile profile, PrimarySkillType skill) {
         int levelsRemoved = profile.getSkillLevel(skill);
         float xpRemoved = profile.getSkillXpLevelRaw(skill);
 
         profile.modifySkill(skill, 0);
 
         if (player == null) {
-            profile.save();
+            profile.scheduleAsyncSave();
             return;
         }
 
-        EventUtils.handleLevelChangeEvent(player, skill, levelsRemoved, xpRemoved, false);
+        EventUtils.tryLevelChangeEvent(player, skill, levelsRemoved, xpRemoved, false, XPGainReason.COMMAND);
     }
 
     protected boolean permissionsCheckSelf(CommandSender sender) {
@@ -129,15 +148,15 @@ public class SkillresetCommand implements TabExecutor {
         player.sendMessage(LocaleLoader.getString("Commands.Reset.All"));
     }
 
-    protected void handlePlayerMessageSkill(Player player, SkillType skill) {
+    protected void handlePlayerMessageSkill(Player player, PrimarySkillType skill) {
         player.sendMessage(LocaleLoader.getString("Commands.Reset.Single", skill.getName()));
     }
 
     private boolean validateArguments(CommandSender sender, String skillName) {
-        return !(CommandUtils.isInvalidSkill(sender, skillName) && !skillName.equalsIgnoreCase("all"));
+        return skillName.equalsIgnoreCase("all") || !CommandUtils.isInvalidSkill(sender, skillName);
     }
 
-    protected static void handleSenderMessage(CommandSender sender, String playerName, SkillType skill) {
+    protected static void handleSenderMessage(CommandSender sender, String playerName, PrimarySkillType skill) {
         if (skill == null) {
             sender.sendMessage(LocaleLoader.getString("Commands.addlevels.AwardAll.2", playerName));
         }
@@ -146,10 +165,10 @@ public class SkillresetCommand implements TabExecutor {
         }
     }
 
-    protected void editValues(Player player, PlayerProfile profile, SkillType skill) {
+    protected void editValues(Player player, PlayerProfile profile, PrimarySkillType skill) {
         if (skill == null) {
-            for (SkillType skillType : SkillType.NON_CHILD_SKILLS) {
-                handleCommand(player, profile, skillType);
+            for (PrimarySkillType primarySkillType : PrimarySkillType.NON_CHILD_SKILLS) {
+                handleCommand(player, profile, primarySkillType);
             }
 
             if (player != null) {

@@ -1,29 +1,29 @@
 package com.gmail.nossr50.commands.skills;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.util.text.StringUtils;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.jetbrains.annotations.NotNull;
 
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.StringUtils;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 public class SkillGuideCommand implements CommandExecutor {
-    private String header;
-    private ArrayList<String> guide;
+    private final String header;
+    private final ArrayList<String> guide;
 
-    private String invalidPage = LocaleLoader.getString("Guides.Page.Invalid");
+    private final String invalidPage = LocaleLoader.getString("Guides.Page.Invalid");
 
-    public SkillGuideCommand(SkillType skill) {
+    public SkillGuideCommand(PrimarySkillType skill) {
         header = LocaleLoader.getString("Guides.Header", skill.getName());
         guide = getGuide(skill);
     }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, String[] args) {
         switch (args.length) {
             case 1:
                 if (!args[0].equals("?")) {
@@ -68,7 +68,7 @@ public class SkillGuideCommand implements CommandExecutor {
 
     private ArrayList<String> grabPageContents(int page) {
         int pageIndexStart = 8 * (page - 1); // Determine what string to start at
-        ArrayList<String> allStrings = new ArrayList<String>();
+        ArrayList<String> allStrings = new ArrayList<>();
 
         allStrings.add(header);
 
@@ -86,8 +86,8 @@ public class SkillGuideCommand implements CommandExecutor {
         return allStrings;
     }
 
-    private ArrayList<String> getGuide(SkillType skill) {
-        ArrayList<String> guide = new ArrayList<String>();
+    private ArrayList<String> getGuide(PrimarySkillType skill) {
+        ArrayList<String> guide = new ArrayList<>();
 
         for (int i = 0; i < 10; i++) {
             String[] section = LocaleLoader.getString("Guides." + StringUtils.getCapitalized(skill.toString()) + ".Section." + i).split("\n");

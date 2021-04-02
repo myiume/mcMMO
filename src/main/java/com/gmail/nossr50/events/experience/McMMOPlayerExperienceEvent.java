@@ -1,31 +1,48 @@
 package com.gmail.nossr50.events.experience;
 
+import com.gmail.nossr50.datatypes.experience.XPGainReason;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.util.player.UserManager;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Cancellable;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.player.PlayerEvent;
-
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.util.player.UserManager;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Generic event for mcMMO experience events.
  */
 public abstract class McMMOPlayerExperienceEvent extends PlayerEvent implements Cancellable {
     private boolean cancelled;
-    protected SkillType skill;
+    protected PrimarySkillType skill;
     protected int skillLevel;
+    protected XPGainReason xpGainReason;
 
-    protected McMMOPlayerExperienceEvent(Player player, SkillType skill) {
+    @Deprecated
+    protected McMMOPlayerExperienceEvent(Player player, PrimarySkillType skill) {
         super(player);
         this.skill = skill;
         this.skillLevel = UserManager.getPlayer(player).getSkillLevel(skill);
+        this.xpGainReason = XPGainReason.UNKNOWN;
+    }
+
+    protected McMMOPlayerExperienceEvent(Player player, PrimarySkillType skill, XPGainReason xpGainReason) {
+        super(player);
+        this.skill = skill;
+
+        if(UserManager.getPlayer(player) != null) {
+            this.skillLevel = UserManager.getPlayer(player).getSkillLevel(skill);
+        } else {
+            this.skillLevel = 0;
+        }
+
+        this.xpGainReason = xpGainReason;
     }
 
     /**
      * @return The skill involved in this event
      */
-    public SkillType getSkill() {
+    public PrimarySkillType getSkill() {
         return skill;
     }
 
@@ -34,6 +51,13 @@ public abstract class McMMOPlayerExperienceEvent extends PlayerEvent implements 
      */
     public int getSkillLevel() {
         return skillLevel;
+    }
+
+    /**
+     * @return The combat type involved in this event
+     */
+    public XPGainReason getXpGainReason() {
+        return xpGainReason;
     }
 
     /** Following are required for Cancellable **/
@@ -46,12 +70,11 @@ public abstract class McMMOPlayerExperienceEvent extends PlayerEvent implements 
     public void setCancelled(boolean cancelled) {
         this.cancelled = cancelled;
     }
-
-    /** Rest of file is required boilerplate for custom events **/
+    
     private static final HandlerList handlers = new HandlerList();
 
     @Override
-    public HandlerList getHandlers() {
+    public @NotNull HandlerList getHandlers() {
         return handlers;
     }
 

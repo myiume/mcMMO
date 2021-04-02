@@ -1,15 +1,15 @@
 package com.gmail.nossr50.skills.excavation;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import com.gmail.nossr50.mcMMO;
-import org.bukkit.block.BlockState;
-
 import com.gmail.nossr50.config.experience.ExperienceConfig;
 import com.gmail.nossr50.config.treasure.TreasureConfig;
-import com.gmail.nossr50.datatypes.skills.SkillType;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
 import com.gmail.nossr50.datatypes.treasure.ExcavationTreasure;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.text.StringUtils;
+import org.bukkit.block.BlockState;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class Excavation {
     /**
@@ -19,38 +19,14 @@ public class Excavation {
      * @return the list of treasures that could be found
      */
     protected static List<ExcavationTreasure> getTreasures(BlockState blockState) {
-        switch (blockState.getType()) {
-            case DIRT:
-                return TreasureConfig.getInstance().excavationFromDirt;
-
-            case GRASS:
-                return TreasureConfig.getInstance().excavationFromGrass;
-
-            case SAND:
-                return TreasureConfig.getInstance().excavationFromSand;
-
-            case GRAVEL:
-                return TreasureConfig.getInstance().excavationFromGravel;
-
-            case CLAY:
-                return TreasureConfig.getInstance().excavationFromClay;
-
-            case MYCEL:
-                return TreasureConfig.getInstance().excavationFromMycel;
-
-            case SOUL_SAND:
-                return TreasureConfig.getInstance().excavationFromSoulSand;
-
-            case SNOW:
-                return TreasureConfig.getInstance().excavationFromSnow;
-
-            default:
-                return new ArrayList<ExcavationTreasure>();
-        }
+        String friendly = StringUtils.getFriendlyConfigBlockDataString(blockState.getBlockData());
+        if (TreasureConfig.getInstance().excavationMap.containsKey(friendly))
+            return TreasureConfig.getInstance().excavationMap.get(friendly);
+        return new ArrayList<>();
     }
 
     protected static int getBlockXP(BlockState blockState) {
-        int xp = ExperienceConfig.getInstance().getXp(SkillType.EXCAVATION, blockState.getType());
+        int xp = ExperienceConfig.getInstance().getXp(PrimarySkillType.EXCAVATION, blockState.getType());
 
         if (xp == 0 && mcMMO.getModManager().isCustomExcavationBlock(blockState)) {
             xp = mcMMO.getModManager().getBlock(blockState).getXpGain();

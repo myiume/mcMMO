@@ -1,23 +1,31 @@
 package com.gmail.nossr50.commands.party;
 
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
-
 import com.gmail.nossr50.config.Config;
 import com.gmail.nossr50.datatypes.party.ItemShareType;
 import com.gmail.nossr50.datatypes.party.Party;
 import com.gmail.nossr50.datatypes.party.PartyFeature;
 import com.gmail.nossr50.datatypes.party.ShareMode;
 import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.StringUtils;
 import com.gmail.nossr50.util.commands.CommandUtils;
 import com.gmail.nossr50.util.player.UserManager;
+import com.gmail.nossr50.util.text.StringUtils;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+import org.jetbrains.annotations.NotNull;
+
+import java.util.Locale;
 
 public class PartyItemShareCommand implements CommandExecutor {
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, String[] args) {
+        if(UserManager.getPlayer((Player) sender) == null)
+        {
+            sender.sendMessage(LocaleLoader.getString("Profile.PendingLoad"));
+            return true;
+        }
+
         Party party = UserManager.getPlayer((Player) sender).getParty();
 
         if (party.getLevel() < Config.getInstance().getPartyFeatureUnlockLevel(PartyFeature.ITEM_SHARE)) {
@@ -27,7 +35,7 @@ public class PartyItemShareCommand implements CommandExecutor {
 
         switch (args.length) {
             case 2:
-                ShareMode mode = ShareMode.getShareMode(args[1].toUpperCase());
+                ShareMode mode = ShareMode.getShareMode(args[1].toUpperCase(Locale.ENGLISH));
 
                 if (mode == null) {
                     sender.sendMessage(LocaleLoader.getString("Commands.Usage.2", "party", "itemshare", "<NONE | EQUAL | RANDOM>"));
@@ -52,7 +60,7 @@ public class PartyItemShareCommand implements CommandExecutor {
                 }
 
                 try {
-                    handleToggleItemShareCategory(party, ItemShareType.valueOf(args[1].toUpperCase()), toggle);
+                    handleToggleItemShareCategory(party, ItemShareType.valueOf(args[1].toUpperCase(Locale.ENGLISH)), toggle);
                 }
                 catch (IllegalArgumentException ex) {
                     sender.sendMessage(LocaleLoader.getString("Commands.Usage.2", "party", "itemshare", "<loot | mining | herbalism | woodcutting | misc> <true | false>"));

@@ -1,74 +1,105 @@
 package com.gmail.nossr50.util.player;
 
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-
-import org.bukkit.OfflinePlayer;
-import org.bukkit.entity.Player;
-
-import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.mcMMO;
+import com.google.common.collect.ImmutableList;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
+import org.bukkit.metadata.FixedMetadataValue;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 
 public final class UserManager {
-    private final static Map<String, McMMOPlayer> players = new HashMap<String, McMMOPlayer>();
+
+    private static HashSet<McMMOPlayer> playerDataSet; //Used to track players for sync saves on shutdown
 
     private UserManager() {}
 
     /**
-     * Add a new user.
+     * Track a new user.
      *
-     * @param player The player to create a user record for
-     * @return the player's {@link McMMOPlayer} object
+     * @param mcMMOPlayer the player profile to start tracking
      */
-    public static McMMOPlayer addUser(Player player) {
-        String playerName = player.getName();
-        McMMOPlayer mcMMOPlayer = players.get(playerName);
+    public static void track(McMMOPlayer mcMMOPlayer) {
+        mcMMOPlayer.getPlayer().setMetadata(mcMMO.playerDataKey, new FixedMetadataValue(mcMMO.p, mcMMOPlayer));
 
-        if (mcMMOPlayer != null) {
-            mcMMOPlayer.setPlayer(player); // The player object is different on each reconnection and must be updated
-        }
-        else {
-            mcMMOPlayer = new McMMOPlayer(player);
-            players.put(playerName, mcMMOPlayer);
-        }
+        if(playerDataSet == null)
+            playerDataSet = new HashSet<>();
 
-        return mcMMOPlayer;
+        playerDataSet.add(mcMMOPlayer); //for sync saves on shutdown
+    }
+
+    public static void cleanupPlayer(McMMOPlayer mcMMOPlayer) {
+        if(playerDataSet != null)
+            playerDataSet.remove(mcMMOPlayer);
     }
 
     /**
      * Remove a user.
      *
-     * @param playerName The name of the player to remove
+     * @param player The Player object
      */
-    public static void remove(String playerName) {
-        players.remove(playerName);
+    public static void remove(Player player) {
+        McMMOPlayer mcMMOPlayer = getPlayer(player);
+        mcMMOPlayer.cleanup();
+        player.removeMetadata(mcMMO.playerDataKey, mcMMO.p);
+
+        if(playerDataSet != null) {
+            playerDataSet.remove(mcMMOPlayer); //Clear sync save tracking
+        }
     }
 
     /**
      * Clear all users.
      */
     public static void clearAll() {
-        players.clear();
+        for (Player player : mcMMO.p.getServer().getOnlinePlayers()) {
+            remove(player);
+        }
+
+        if(playerDataSet != null)
+            playerDataSet.clear(); //Clear sync save tracking
     }
 
     /**
-     * Save all users.
+     * Save all users ON THIS THREAD.
      */
     public static void saveAll() {
-        mcMMO.p.debug("Saving mcMMOPlayers... (" + players.size() + ")");
-        for (McMMOPlayer mcMMOPlayer : players.values()) {
-            mcMMOPlayer.getProfile().save();
-        }
-    }
+        if(playerDataSet == null)
+            return;
 
-    public static Set<String> getPlayerNames() {
-        return players.keySet();
+        ImmutableList<McMMOPlayer> trackedSyncData = ImmutableList.copyOf(playerDataSet);
+
+        mcMMO.p.getLogger().info("Saving mcMMOPlayers... (" + trackedSyncData.size() + ")");
+
+        for (McMMOPlayer playerData : trackedSyncData) {
+            try
+            {
+                mcMMO.p.getLogger().info("Saving data for player: "+playerData.getPlayerName());
+                playerData.getProfile().save(true);
+            }
+            catch (Exception e)
+            {
+                mcMMO.p.getLogger().warning("Could not save mcMMO player data for player: " + playerData.getPlayerName());
+            }
+        }
+
+        mcMMO.p.getLogger().info("Finished save operation for "+trackedSyncData.size()+" players!");
     }
 
     public static Collection<McMMOPlayer> getPlayers() {
-        return players.values();
+        Collection<McMMOPlayer> playerCollection = new ArrayList<>();
+
+        for (Player player : mcMMO.p.getServer().getOnlinePlayers()) {
+            if (hasPlayerDataKey(player)) {
+                playerCollection.add(getPlayer(player));
+            }
+        }
+
+        return playerCollection;
     }
 
     /**
@@ -81,42 +112,46 @@ public final class UserManager {
         return retrieveMcMMOPlayer(playerName, false);
     }
 
+    public static McMMOPlayer getOfflinePlayer(OfflinePlayer player) {
+        if (player instanceof Player) {
+            return getPlayer((Player) player);
+        }
+
+        return retrieveMcMMOPlayer(player.getName(), true);
+    }
+
+    public static McMMOPlayer getOfflinePlayer(String playerName) {
+        return retrieveMcMMOPlayer(playerName, true);
+    }
+
     /**
-     * Get the McMMOPlayer of a player.
-     *
-     * @param player The player whose McMMOPlayer to retrieve
-     * @return the player's McMMOPlayer object
+     * Gets the McMMOPlayer object for a player, this can be null if the player has not yet been loaded.
+     * @param player target player
+     * @return McMMOPlayer object for this player, null if Player has not been loaded
      */
-    public static McMMOPlayer getPlayer(OfflinePlayer player) {
-        return retrieveMcMMOPlayer(player.getName(), false);
-    }
-
-    public static McMMOPlayer getPlayer(OfflinePlayer player, boolean offlineValid) {
-        return retrieveMcMMOPlayer(player.getName(), offlineValid);
-    }
-
-    public static McMMOPlayer getPlayer(String playerName, boolean offlineValid) {
-        return retrieveMcMMOPlayer(playerName, offlineValid);
+    public static McMMOPlayer getPlayer(Player player) {
+        //Avoid Array Index out of bounds
+        if(player != null && player.hasMetadata(mcMMO.playerDataKey))
+            return (McMMOPlayer) player.getMetadata(mcMMO.playerDataKey).get(0).value();
+        else
+            return null;
     }
 
     private static McMMOPlayer retrieveMcMMOPlayer(String playerName, boolean offlineValid) {
-        McMMOPlayer mcMMOPlayer = players.get(playerName);
+        Player player = mcMMO.p.getServer().getPlayerExact(playerName);
 
-        if (mcMMOPlayer == null) {
-            Player player = mcMMO.p.getServer().getPlayerExact(playerName);
-
-            if (player == null) {
-                if (!offlineValid) {
-                    mcMMO.p.getLogger().warning("A valid mcMMOPlayer object could not be found for " + playerName + ".");
-                }
-
-                return null;
+        if (player == null) {
+            if (!offlineValid) {
+                mcMMO.p.getLogger().warning("A valid mcMMOPlayer object could not be found for " + playerName + ".");
             }
 
-            mcMMOPlayer = new McMMOPlayer(player);
-            players.put(playerName, mcMMOPlayer);
+            return null;
         }
 
-        return mcMMOPlayer;
+        return getPlayer(player);
+    }
+
+    public static boolean hasPlayerDataKey(Entity entity) {
+        return entity != null && entity.hasMetadata(mcMMO.playerDataKey);
     }
 }

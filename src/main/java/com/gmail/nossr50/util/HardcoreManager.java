@@ -1,108 +1,129 @@
 package com.gmail.nossr50.util;
 
+import com.gmail.nossr50.config.Config;
+import com.gmail.nossr50.datatypes.interactions.NotificationType;
+import com.gmail.nossr50.datatypes.player.PlayerProfile;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.util.player.NotificationManager;
+import com.gmail.nossr50.util.player.UserManager;
+import com.gmail.nossr50.worldguard.WorldGuardManager;
+import com.gmail.nossr50.worldguard.WorldGuardUtils;
 import org.bukkit.entity.Player;
 
-import com.gmail.nossr50.config.Config;
-import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.player.PlayerProfile;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.player.UserManager;
+import java.util.HashMap;
 
 public final class HardcoreManager {
     private HardcoreManager() {}
 
     public static void invokeStatPenalty(Player player) {
+
+        if(WorldGuardUtils.isWorldGuardLoaded()) {
+            if(!WorldGuardManager.getInstance().hasHardcoreFlag(player))
+                return;
+        }
+
         double statLossPercentage = Config.getInstance().getHardcoreDeathStatPenaltyPercentage();
         int levelThreshold = Config.getInstance().getHardcoreDeathStatPenaltyLevelThreshold();
+
+        if(UserManager.getPlayer(player) == null)
+            return;
 
         PlayerProfile playerProfile = UserManager.getPlayer(player).getProfile();
         int totalLevelsLost = 0;
 
-        for (SkillType skillType : SkillType.NON_CHILD_SKILLS) {
-            if (!skillType.getHardcoreStatLossEnabled()) {
-                break;
-            }
+        HashMap<String, Integer> levelChanged = new HashMap<>();
+        HashMap<String, Float> experienceChanged = new HashMap<>();
 
-            int playerSkillLevel = playerProfile.getSkillLevel(skillType);
-            int playerSkillXpLevel = playerProfile.getSkillXpLevel(skillType);
-
-            if (playerSkillLevel <= 0 || playerSkillLevel <= levelThreshold) {
+        for (PrimarySkillType primarySkillType : PrimarySkillType.NON_CHILD_SKILLS) {
+            if (!primarySkillType.getHardcoreStatLossEnabled()) {
+                levelChanged.put(primarySkillType.toString(), 0);
+                experienceChanged.put(primarySkillType.toString(), 0F);
                 continue;
             }
 
-            double statsLost = playerSkillLevel * (statLossPercentage * 0.01D);
+            int playerSkillLevel = playerProfile.getSkillLevel(primarySkillType);
+            int playerSkillXpLevel = playerProfile.getSkillXpLevel(primarySkillType);
+
+            if (playerSkillLevel <= 0 || playerSkillLevel <= levelThreshold) {
+                levelChanged.put(primarySkillType.toString(), 0);
+                experienceChanged.put(primarySkillType.toString(), 0F);
+                continue;
+            }
+
+            double statsLost = Math.max(0, (playerSkillLevel - levelThreshold)) * (statLossPercentage * 0.01D);
             int levelsLost = (int) statsLost;
             int xpLost = (int) Math.floor(playerSkillXpLevel * (statsLost - levelsLost));
+            levelChanged.put(primarySkillType.toString(), levelsLost);
+            experienceChanged.put(primarySkillType.toString(), (float) xpLost);
 
             totalLevelsLost += levelsLost;
-
-            playerProfile.modifySkill(skillType, playerSkillLevel - levelsLost);
-            playerProfile.removeXp(skillType, xpLost);
-
-            if (playerProfile.getSkillXpLevel(skillType) < 0) {
-                playerProfile.setSkillXpLevel(skillType, 0);
-            }
-
-            if (playerProfile.getSkillLevel(skillType) < 0) {
-                playerProfile.modifySkill(skillType, 0);
-            }
         }
 
-        player.sendMessage(LocaleLoader.getString("Hardcore.DeathStatLoss.PlayerDeath", totalLevelsLost));
+        if (!EventUtils.handleStatsLossEvent(player, levelChanged, experienceChanged)) {
+            return;
+        }
+
+        NotificationManager.sendPlayerInformation(player, NotificationType.HARDCORE_MODE, "Hardcore.DeathStatLoss.PlayerDeath", String.valueOf(totalLevelsLost));
     }
 
     public static void invokeVampirism(Player killer, Player victim) {
+
+        if(WorldGuardUtils.isWorldGuardLoaded()) {
+            if(!WorldGuardManager.getInstance().hasHardcoreFlag(killer) || !WorldGuardManager.getInstance().hasHardcoreFlag(victim))
+                return;
+        }
+
         double vampirismStatLeechPercentage = Config.getInstance().getHardcoreVampirismStatLeechPercentage();
         int levelThreshold = Config.getInstance().getHardcoreVampirismLevelThreshold();
 
-        McMMOPlayer killerPlayer = UserManager.getPlayer(killer);
-        PlayerProfile killerProfile = killerPlayer.getProfile();
+        if(UserManager.getPlayer(killer) == null || UserManager.getPlayer(victim) == null)
+            return;
+
+        PlayerProfile killerProfile = UserManager.getPlayer(killer).getProfile();
         PlayerProfile victimProfile = UserManager.getPlayer(victim).getProfile();
         int totalLevelsStolen = 0;
 
-        for (SkillType skillType : SkillType.NON_CHILD_SKILLS) {
-            if (!skillType.getHardcoreVampirismEnabled()) {
-                break;
-            }
+        HashMap<String, Integer> levelChanged = new HashMap<>();
+        HashMap<String, Float> experienceChanged = new HashMap<>();
 
-            int killerSkillLevel = killerProfile.getSkillLevel(skillType);
-            int victimSkillLevel = victimProfile.getSkillLevel(skillType);
-
-            if (victimSkillLevel <= 0 || victimSkillLevel < killerSkillLevel / 2 || victimSkillLevel <= levelThreshold) {
+        for (PrimarySkillType primarySkillType : PrimarySkillType.NON_CHILD_SKILLS) {
+            if (!primarySkillType.getHardcoreVampirismEnabled()) {
+                levelChanged.put(primarySkillType.toString(), 0);
+                experienceChanged.put(primarySkillType.toString(), 0F);
                 continue;
             }
 
-            int victimSkillXpLevel = victimProfile.getSkillXpLevel(skillType);
+            int killerSkillLevel = killerProfile.getSkillLevel(primarySkillType);
+            int victimSkillLevel = victimProfile.getSkillLevel(primarySkillType);
+
+            if (victimSkillLevel <= 0 || victimSkillLevel < killerSkillLevel / 2 || victimSkillLevel <= levelThreshold) {
+                levelChanged.put(primarySkillType.toString(), 0);
+                experienceChanged.put(primarySkillType.toString(), 0F);
+                continue;
+            }
+
+            int victimSkillXpLevel = victimProfile.getSkillXpLevel(primarySkillType);
 
             double statsStolen = victimSkillLevel * (vampirismStatLeechPercentage * 0.01D);
             int levelsStolen = (int) statsStolen;
             int xpStolen = (int) Math.floor(victimSkillXpLevel * (statsStolen - levelsStolen));
+            levelChanged.put(primarySkillType.toString(), levelsStolen);
+            experienceChanged.put(primarySkillType.toString(), (float) xpStolen);
 
             totalLevelsStolen += levelsStolen;
+        }
 
-            killerPlayer.addLevels(skillType, levelsStolen);
-            killerPlayer.beginUnsharedXpGain(skillType, xpStolen);
-
-            victimProfile.modifySkill(skillType, victimSkillLevel - levelsStolen);
-            victimProfile.removeXp(skillType, xpStolen);
-
-            if (victimProfile.getSkillXpLevel(skillType) < 0) {
-                victimProfile.setSkillXpLevel(skillType, 0);
-            }
-
-            if (victimProfile.getSkillLevel(skillType) < 0) {
-                victimProfile.modifySkill(skillType, 0);
-            }
+        if (!EventUtils.handleVampirismEvent(killer, victim, levelChanged, experienceChanged)) {
+            return;
         }
 
         if (totalLevelsStolen > 0) {
-            killer.sendMessage(LocaleLoader.getString("Hardcore.Vampirism.Killer.Success", totalLevelsStolen, victim.getName()));
-            victim.sendMessage(LocaleLoader.getString("Hardcore.Vampirism.Victim.Success", killer.getName(), totalLevelsStolen));
+            NotificationManager.sendPlayerInformation(killer, NotificationType.HARDCORE_MODE, "Hardcore.Vampirism.Killer.Success", String.valueOf(totalLevelsStolen), victim.getName());
+            NotificationManager.sendPlayerInformation(victim, NotificationType.HARDCORE_MODE, "Hardcore.Vampirism.Victim.Success", killer.getName(), String.valueOf(totalLevelsStolen));
         }
         else {
-            killer.sendMessage(LocaleLoader.getString("Hardcore.Vampirism.Killer.Failure", victim.getName()));
-            victim.sendMessage(LocaleLoader.getString("Hardcore.Vampirism.Victim.Failure", killer.getName()));
+            NotificationManager.sendPlayerInformation(killer, NotificationType.HARDCORE_MODE, "Hardcore.Vampirism.Killer.Failure", victim.getName());
+            NotificationManager.sendPlayerInformation(victim, NotificationType.HARDCORE_MODE, "Hardcore.Vampirism.Victim.Failure", killer.getName());
         }
     }
 
@@ -114,8 +135,8 @@ public final class HardcoreManager {
     public static boolean isStatLossEnabled() {
         boolean enabled = false;
 
-        for (SkillType skillType : SkillType.NON_CHILD_SKILLS) {
-            if (skillType.getHardcoreStatLossEnabled()) {
+        for (PrimarySkillType primarySkillType : PrimarySkillType.NON_CHILD_SKILLS) {
+            if (primarySkillType.getHardcoreStatLossEnabled()) {
                 enabled = true;
                 break;
             }
@@ -132,8 +153,8 @@ public final class HardcoreManager {
     public static boolean isVampirismEnabled() {
         boolean enabled = false;
 
-        for (SkillType skillType : SkillType.NON_CHILD_SKILLS) {
-            if (skillType.getHardcoreVampirismEnabled()) {
+        for (PrimarySkillType primarySkillType : PrimarySkillType.NON_CHILD_SKILLS) {
+            if (primarySkillType.getHardcoreVampirismEnabled()) {
                 enabled = true;
                 break;
             }

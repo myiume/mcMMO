@@ -1,33 +1,33 @@
 package com.gmail.nossr50.config.skills.alchemy;
 
+import com.gmail.nossr50.config.ConfigLoader;
+import com.gmail.nossr50.datatypes.skills.alchemy.AlchemyPotion;
+import com.gmail.nossr50.mcMMO;
+import org.bukkit.ChatColor;
+import org.bukkit.Color;
+import org.bukkit.Material;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.potion.*;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.bukkit.Material;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.ConfigLoader;
-import com.gmail.nossr50.datatypes.skills.alchemy.AlchemyPotion;
-
 public class PotionConfig extends ConfigLoader {
     private static PotionConfig instance;
 
-    public List<ItemStack> concoctionsIngredientsTierOne = new ArrayList<ItemStack>();
-    public List<ItemStack> concoctionsIngredientsTierTwo = new ArrayList<ItemStack>();
-    public List<ItemStack> concoctionsIngredientsTierThree = new ArrayList<ItemStack>();
-    public List<ItemStack> concoctionsIngredientsTierFour = new ArrayList<ItemStack>();
-    public List<ItemStack> concoctionsIngredientsTierFive = new ArrayList<ItemStack>();
-    public List<ItemStack> concoctionsIngredientsTierSix = new ArrayList<ItemStack>();
-    public List<ItemStack> concoctionsIngredientsTierSeven = new ArrayList<ItemStack>();
-    public List<ItemStack> concoctionsIngredientsTierEight = new ArrayList<ItemStack>();
+    private final List<ItemStack> concoctionsIngredientsTierOne = new ArrayList<>();
+    private final List<ItemStack> concoctionsIngredientsTierTwo = new ArrayList<>();
+    private final List<ItemStack> concoctionsIngredientsTierThree = new ArrayList<>();
+    private final List<ItemStack> concoctionsIngredientsTierFour = new ArrayList<>();
+    private final List<ItemStack> concoctionsIngredientsTierFive = new ArrayList<>();
+    private final List<ItemStack> concoctionsIngredientsTierSix = new ArrayList<>();
+    private final List<ItemStack> concoctionsIngredientsTierSeven = new ArrayList<>();
+    private final List<ItemStack> concoctionsIngredientsTierEight = new ArrayList<>();
 
-    public Map<Short, AlchemyPotion> potionMap = new HashMap<Short, AlchemyPotion>();
+    private final Map<String, AlchemyPotion> potionMap = new HashMap<>();
 
     private PotionConfig() {
         super("potions.yml");
@@ -89,11 +89,11 @@ public class PotionConfig extends ConfigLoader {
         int pass = 0;
         int fail = 0;
 
-        for (String dataValue : potionSection.getKeys(false)) {
-            AlchemyPotion potion = loadPotion(potionSection.getConfigurationSection(dataValue));
+        for (String potionName : potionSection.getKeys(false)) {
+            AlchemyPotion potion = loadPotion(potionSection.getConfigurationSection(potionName));
 
             if (potion != null) {
-                potionMap.put(potion.getDataValue(), potion);
+                potionMap.put(potionName, potion);
                 pass++;
             }
             else {
@@ -114,18 +114,37 @@ public class PotionConfig extends ConfigLoader {
      */
     private AlchemyPotion loadPotion(ConfigurationSection potion_section) {
         try {
-            short dataValue = Short.parseShort(potion_section.getName());
+            
 
             String name = potion_section.getString("Name");
+            if (name != null) {
+                name = ChatColor.translateAlternateColorCodes('&', name);
+            }
+            
+            PotionData data;
+            if (!potion_section.contains("PotionData")) { // Backwards config compatability
+                short dataValue = Short.parseShort(potion_section.getName());
+                Potion potion = Potion.fromDamage(dataValue);
+                data = new PotionData(potion.getType(), potion.hasExtendedDuration(), potion.getLevel() == 2);
+            } else {
+                ConfigurationSection potionData = potion_section.getConfigurationSection("PotionData");
+                data = new PotionData(PotionType.valueOf(potionData.getString("PotionType", "WATER")), potionData.getBoolean("Extended", false), potionData.getBoolean("Upgraded", false));
+            }
+            
+            Material material = Material.POTION;
+            String mat = potion_section.getString("Material", null);
+            if (mat != null) {
+                material = Material.valueOf(mat);
+            }
 
-            List<String> lore = new ArrayList<String>();
+            List<String> lore = new ArrayList<>();
             if (potion_section.contains("Lore")) {
                 for (String line : potion_section.getStringList("Lore")) {
-                    lore.add(line);
+                    lore.add(ChatColor.translateAlternateColorCodes('&', line));
                 }
             }
 
-            List<PotionEffect> effects = new ArrayList<PotionEffect>();
+            List<PotionEffect> effects = new ArrayList<>();
             if (potion_section.contains("Effects")) {
                 for (String effect : potion_section.getStringList("Effects")) {
                     String[] parts = effect.split(" ");
@@ -142,13 +161,21 @@ public class PotionConfig extends ConfigLoader {
                     }
                 }
             }
+            
+            Color color;
+            if (potion_section.contains("Color")) {
+                color = Color.fromRGB(potion_section.getInt("Color"));
+            }
+            else {
+                color = this.generateColor(effects);
+            }
 
-            Map<ItemStack, Short> children = new HashMap<ItemStack, Short>();
+            Map<ItemStack, String> children = new HashMap<>();
             if (potion_section.contains("Children")) {
                 for (String child : potion_section.getConfigurationSection("Children").getKeys(false)) {
                     ItemStack ingredient = loadIngredient(child);
                     if (ingredient != null) {
-                        children.put(ingredient, Short.parseShort(potion_section.getConfigurationSection("Children").getString(child)));
+                        children.put(ingredient, potion_section.getConfigurationSection("Children").getString(child));
                     }
                     else {
                         mcMMO.p.getLogger().warning("Failed to parse child for potion " + name + ": " + child);
@@ -156,7 +183,7 @@ public class PotionConfig extends ConfigLoader {
                 }
             }
 
-            return new AlchemyPotion(dataValue, name, lore, effects, children);
+            return new AlchemyPotion(material, data, name, lore, effects, color, children);
         }
         catch (Exception e) {
             mcMMO.p.getLogger().warning("Failed to load Alchemy potion: " + potion_section.getName());
@@ -178,15 +205,82 @@ public class PotionConfig extends ConfigLoader {
             return null;
         }
 
-        String[] parts = ingredient.split(":");
-
-        Material material = parts.length > 0 ? Material.getMaterial(parts[0]) : null;
-        short data = parts.length > 1 ? Short.parseShort(parts[1]) : 0;
+        Material material = Material.getMaterial(ingredient);
 
         if (material != null) {
-            return new ItemStack(material, 1, data);
+            return new ItemStack(material, 1);
         }
 
         return null;
     }
+
+    public List<ItemStack> getIngredients(int tier) {
+        switch (tier) {
+            case 8:
+                return concoctionsIngredientsTierEight;
+            case 7:
+                return concoctionsIngredientsTierSeven;
+            case 6:
+                return concoctionsIngredientsTierSix;
+            case 5:
+                return concoctionsIngredientsTierFive;
+            case 4:
+                return concoctionsIngredientsTierFour;
+            case 3:
+                return concoctionsIngredientsTierThree;
+            case 2:
+                return concoctionsIngredientsTierTwo;
+            case 1:
+            default:
+                return concoctionsIngredientsTierOne;
+        }
+    }
+
+    public boolean isValidPotion(ItemStack item) {
+        return getPotion(item) != null;
+    }
+
+    public AlchemyPotion getPotion(String name) {
+        return potionMap.get(name);
+    }
+    
+    public AlchemyPotion getPotion(ItemStack item) {
+        for (AlchemyPotion potion : potionMap.values()) {
+            if (potion.isSimilar(item)) {
+                return potion;
+            }
+        }
+        return null;
+    }
+    
+    public Color generateColor(List<PotionEffect> effects) {
+        if (effects != null && !effects.isEmpty()) {
+            List<Color> colors = new ArrayList<>();
+            for (PotionEffect effect : effects) {
+                if (effect.getType().getColor() != null) {
+                    colors.add(effect.getType().getColor());
+                }
+            }
+            if (!colors.isEmpty()) {
+                if (colors.size() > 1) {
+                    return calculateAverageColor(colors);
+                }
+                return colors.get(0);
+            }
+        }
+        return null;
+    }
+    
+    public Color calculateAverageColor(List<Color> colors) {
+        int red = 0;
+        int green = 0;
+        int blue = 0;
+        for (Color color : colors) {
+            red += color.getRed();
+            green += color.getGreen();
+            blue += color.getBlue();
+        }
+        return Color.fromRGB(red/colors.size(), green/colors.size(), blue/colors.size());
+    }
+    
 }

@@ -1,8 +1,10 @@
 package com.gmail.nossr50.events.experience;
 
+import com.gmail.nossr50.datatypes.experience.XPGainReason;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
 import org.bukkit.entity.Player;
-
-import com.gmail.nossr50.datatypes.skills.SkillType;
+import org.bukkit.event.HandlerList;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Called when a player gains XP in a skill
@@ -10,8 +12,14 @@ import com.gmail.nossr50.datatypes.skills.SkillType;
 public class McMMOPlayerXpGainEvent extends McMMOPlayerExperienceEvent {
     private float xpGained;
 
-    public McMMOPlayerXpGainEvent(Player player, SkillType skill, float xpGained) {
-        super(player, skill);
+    @Deprecated
+    public McMMOPlayerXpGainEvent(Player player, PrimarySkillType skill, float xpGained) {
+        super(player, skill, XPGainReason.UNKNOWN);
+        this.xpGained = xpGained;
+    }
+
+    public McMMOPlayerXpGainEvent(Player player, PrimarySkillType skill, float xpGained, XPGainReason xpGainReason) {
+        super(player, skill, xpGainReason);
         this.xpGained = xpGained;
     }
 
@@ -43,5 +51,16 @@ public class McMMOPlayerXpGainEvent extends McMMOPlayerExperienceEvent {
     @Deprecated
     public void setXpGained(int xpGained) {
         this.xpGained = xpGained;
+    }
+
+    private static final HandlerList handlers = new HandlerList();
+
+    @Override
+    public @NotNull HandlerList getHandlers() {
+        return handlers;
+    }
+
+    public static HandlerList getHandlerList() {
+        return handlers;
     }
 }

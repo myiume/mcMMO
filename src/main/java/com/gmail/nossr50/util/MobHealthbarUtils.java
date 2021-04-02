@@ -1,5 +1,11 @@
 package com.gmail.nossr50.util;
 
+import com.gmail.nossr50.config.Config;
+import com.gmail.nossr50.datatypes.MobHealthbarType;
+import com.gmail.nossr50.datatypes.meta.OldName;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.runnables.MobHealthDisplayUpdaterTask;
+import com.gmail.nossr50.util.text.StringUtils;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -7,16 +13,8 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.metadata.FixedMetadataValue;
 
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.AdvancedConfig;
-import com.gmail.nossr50.config.Config;
-import com.gmail.nossr50.datatypes.MobHealthbarType;
-import com.gmail.nossr50.datatypes.player.PlayerProfile;
-import com.gmail.nossr50.runnables.MobHealthDisplayUpdaterTask;
-import com.gmail.nossr50.util.player.UserManager;
-
 public final class MobHealthbarUtils {
-    private MobHealthbarUtils() {};
+    private MobHealthbarUtils() {}
 
     /**
      * Fix issues with death messages caused by the mob healthbars.
@@ -29,18 +27,16 @@ public final class MobHealthbarUtils {
         EntityDamageEvent lastDamageCause = player.getLastDamageCause();
         String replaceString = lastDamageCause instanceof EntityDamageByEntityEvent ? StringUtils.getPrettyEntityTypeString(((EntityDamageByEntityEvent) lastDamageCause).getDamager().getType()) : "a mob";
 
-        return deathMessage.replaceAll("(?:\u00A7(?:[0-9A-FK-ORa-fk-or]){1}(?:[\u2764\u25A0]{1,10})){1,2}", replaceString);
+        return deathMessage.replaceAll("(?:(\u00A7(?:[0-9A-FK-ORa-fk-or]))*(?:[\u2764\u25A0]{1,10})){1,2}", replaceString);
     }
 
     /**
      * Handle the creation of mob healthbars.
-     *
-     * @param player the attacking player
-     * @param target the targetted entity
+     *  @param target the targetted entity
      * @param damage damage done by the attack triggering this
      */
-    public static void handleMobHealthbars(Player player, LivingEntity target, double damage) {
-        if (mcMMO.isHealthBarPluginEnabled() || !Permissions.mobHealthDisplay(player)) {
+    public static void handleMobHealthbars(LivingEntity target, double damage, mcMMO plugin) {
+        if (mcMMO.isHealthBarPluginEnabled() || !Config.getInstance().getMobHealthbarEnabled()) {
             return;
         }
 
@@ -48,27 +44,26 @@ public final class MobHealthbarUtils {
             return;
         }
 
-        PlayerProfile profile = UserManager.getPlayer(player).getProfile();
-
-        if (profile.getMobHealthbarType() == null) {
-            profile.setMobHealthbarType(Config.getInstance().getMobHealthbarDefault());
-        }
-
-        if (profile.getMobHealthbarType() == MobHealthbarType.DISABLED) {
+        // Don't mangle invalid entities, they're not going to be rendered anyways
+        if (!target.isValid()) {
             return;
         }
 
+        String originalName = target.getName();
         String oldName = target.getCustomName();
+
+        /*
+         * Store the name in metadata
+         */
+        if(target.getMetadata(TransientMetadataTools.OLD_NAME_METAKEY).size() <= 0 && originalName != null)
+            target.setMetadata(TransientMetadataTools.OLD_NAME_METAKEY, new OldName(originalName, plugin));
 
         if (oldName == null) {
             oldName = "";
         }
-        else if (oldName.equalsIgnoreCase(AdvancedConfig.getInstance().getKrakenName())) {
-            return;
-        }
 
         boolean oldNameVisible = target.isCustomNameVisible();
-        String newName = createHealthDisplay(profile, target, damage);
+        String newName = createHealthDisplay(Config.getInstance().getMobHealthbarDefault(), target, damage);
 
         target.setCustomName(newName);
         target.setCustomNameVisible(true);
@@ -91,7 +86,7 @@ public final class MobHealthbarUtils {
         }
     }
 
-    private static String createHealthDisplay(PlayerProfile profile, LivingEntity entity, double damage) {
+    private static String createHealthDisplay(MobHealthbarType mobHealthbarType, LivingEntity entity, double damage) {
         double maxHealth = entity.getMaxHealth();
         double currentHealth = Math.max(entity.getHealth() - damage, 0);
         double healthPercentage = (currentHealth / maxHealth) * 100.0D;
@@ -100,7 +95,7 @@ public final class MobHealthbarUtils {
         ChatColor color = ChatColor.BLACK;
         String symbol;
 
-        switch (profile.getMobHealthbarType()) {
+        switch (mobHealthbarType) {
             case HEARTS:
                 fullDisplay = Math.min((int) (maxHealth / 2), 10);
                 color = ChatColor.DARK_RED;
@@ -139,19 +134,19 @@ public final class MobHealthbarUtils {
         int coloredDisplay = (int) Math.ceil(fullDisplay * (healthPercentage / 100.0D));
         int grayDisplay = fullDisplay - coloredDisplay;
 
-        String healthbar = color + "";
+        StringBuilder healthbar = new StringBuilder(color + "");
 
         for (int i = 0; i < coloredDisplay; i++) {
-            healthbar += symbol;
+            healthbar.append(symbol);
         }
 
-        healthbar += ChatColor.GRAY;
+        healthbar.append(ChatColor.GRAY);
 
         for (int i = 0; i < grayDisplay; i++) {
-            healthbar += symbol;
+            healthbar.append(symbol);
         }
 
-        return healthbar;
+        return healthbar.toString();
     }
 
     /**

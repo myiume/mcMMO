@@ -15,7 +15,6 @@ import org.bukkit.block.BlockState;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Entity;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.material.MaterialData;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -23,36 +22,36 @@ import java.util.HashMap;
 import java.util.List;
 
 public class ModManager {
-    private List<Repairable> repairables = new ArrayList<Repairable>();
+    private final List<Repairable> repairables = new ArrayList<>();
 
     // Armor Mods
-    private List<Material> customBoots       = new ArrayList<Material>();
-    private List<Material> customChestplates = new ArrayList<Material>();
-    private List<Material> customHelmets     = new ArrayList<Material>();
-    private List<Material> customLeggings    = new ArrayList<Material>();
+    private final List<Material> customBoots       = new ArrayList<>();
+    private final List<Material> customChestplates = new ArrayList<>();
+    private final List<Material> customHelmets     = new ArrayList<>();
+    private final List<Material> customLeggings    = new ArrayList<>();
 
     // Block Mods
-    private List<MaterialData> customExcavationBlocks  = new ArrayList<MaterialData>();
-    private List<MaterialData> customHerbalismBlocks   = new ArrayList<MaterialData>();
-    private List<MaterialData> customMiningBlocks      = new ArrayList<MaterialData>();
-    private List<MaterialData> customOres              = new ArrayList<MaterialData>();
-    private List<MaterialData> customLogs              = new ArrayList<MaterialData>();
-    private List<MaterialData> customLeaves            = new ArrayList<MaterialData>();
-    private List<MaterialData> customAbilityBlocks     = new ArrayList<MaterialData>();
-    private HashMap<MaterialData, CustomBlock> customBlockMap = new HashMap<MaterialData, CustomBlock>();
+    private final List<Material> customExcavationBlocks  = new ArrayList<>();
+    private final List<Material> customHerbalismBlocks   = new ArrayList<>();
+    private final List<Material> customMiningBlocks      = new ArrayList<>();
+    private final List<Material> customOres              = new ArrayList<>();
+    private final List<Material> customLogs              = new ArrayList<>();
+    private final List<Material> customLeaves            = new ArrayList<>();
+    private final List<Material> customAbilityBlocks     = new ArrayList<>();
+    private final HashMap<Material, CustomBlock> customBlockMap = new HashMap<>();
 
     // Entity Mods
-    private HashMap<String, CustomEntity> customEntityClassMap = new HashMap<String, CustomEntity>();
-    private HashMap<String, CustomEntity> customEntityTypeMap  = new HashMap<String, CustomEntity>();
+    private final HashMap<String, CustomEntity> customEntityClassMap = new HashMap<>();
+    private final HashMap<String, CustomEntity> customEntityTypeMap  = new HashMap<>();
 
     // Tool Mods
-    private List<Material> customAxes     = new ArrayList<Material>();
-    private List<Material> customBows     = new ArrayList<Material>();
-    private List<Material> customHoes     = new ArrayList<Material>();
-    private List<Material> customPickaxes = new ArrayList<Material>();
-    private List<Material> customShovels  = new ArrayList<Material>();
-    private List<Material> customSwords   = new ArrayList<Material>();
-    private HashMap<Material, CustomTool> customToolMap = new HashMap<Material, CustomTool>();
+    private final List<Material> customAxes     = new ArrayList<>();
+    private final List<Material> customBows     = new ArrayList<>();
+    private final List<Material> customHoes     = new ArrayList<>();
+    private final List<Material> customPickaxes = new ArrayList<>();
+    private final List<Material> customShovels  = new ArrayList<>();
+    private final List<Material> customSwords   = new ArrayList<>();
+    private final HashMap<Material, CustomTool> customToolMap = new HashMap<>();
 
     public void registerCustomArmor(CustomArmorConfig config) {
         customBoots.addAll(config.customBoots);
@@ -129,39 +128,35 @@ public class ModManager {
         return Config.getInstance().getToolModsEnabled() && customSwords.contains(material);
     }
 
-    public boolean isCustomOre(MaterialData data) {
+    public boolean isCustomOre(Material data) {
         return Config.getInstance().getBlockModsEnabled() && customOres.contains(data);
     }
 
     public boolean isCustomLog(BlockState state) {
-        return Config.getInstance().getBlockModsEnabled() && customLogs.contains(state.getData());
-    }
-
-    public boolean isCustomLeaf(BlockState state) {
-        return Config.getInstance().getBlockModsEnabled() && customLeaves.contains(state.getData());
+        return Config.getInstance().getBlockModsEnabled() && customLogs.contains(state.getType());
     }
 
     public boolean isCustomAbilityBlock(BlockState state) {
-        return Config.getInstance().getBlockModsEnabled() && customAbilityBlocks.contains(state.getData());
+        return Config.getInstance().getBlockModsEnabled() && customAbilityBlocks.contains(state.getType());
     }
 
     public boolean isCustomExcavationBlock(BlockState state) {
-        return Config.getInstance().getBlockModsEnabled() && customExcavationBlocks.contains(state.getData());
+        return Config.getInstance().getBlockModsEnabled() && customExcavationBlocks.contains(state.getType());
     }
 
     public boolean isCustomHerbalismBlock(BlockState state) {
-        return Config.getInstance().getBlockModsEnabled() && customHerbalismBlocks.contains(state.getData());
+        return Config.getInstance().getBlockModsEnabled() && customHerbalismBlocks.contains(state.getType());
     }
 
     public boolean isCustomMiningBlock(BlockState state) {
-        return Config.getInstance().getBlockModsEnabled() && customMiningBlocks.contains(state.getData());
+        return Config.getInstance().getBlockModsEnabled() && customMiningBlocks.contains(state.getType());
     }
 
     public CustomBlock getBlock(BlockState state) {
-        return customBlockMap.get(state.getData());
+        return customBlockMap.get(state.getType());
     }
 
-    public CustomBlock getBlock(MaterialData data) {
+    public CustomBlock getBlock(Material data) {
         return customBlockMap.get(data);
     }
 

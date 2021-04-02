@@ -1,42 +1,61 @@
 package com.gmail.nossr50.skills.swords;
 
+import com.gmail.nossr50.config.AdvancedConfig;
+import com.gmail.nossr50.datatypes.interactions.NotificationType;
+import com.gmail.nossr50.datatypes.meta.RuptureTaskMeta;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.datatypes.skills.SuperAbilityType;
+import com.gmail.nossr50.datatypes.skills.ToolType;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.runnables.skills.RuptureTask;
+import com.gmail.nossr50.skills.SkillManager;
+import com.gmail.nossr50.util.ItemUtils;
+import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.player.NotificationManager;
+import com.gmail.nossr50.util.random.RandomChanceUtil;
+import com.gmail.nossr50.util.skills.CombatUtils;
+import com.gmail.nossr50.util.skills.RankUtils;
+import com.gmail.nossr50.util.skills.SkillActivationType;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageEvent.DamageModifier;
+import org.bukkit.inventory.ItemStack;
+import org.jetbrains.annotations.NotNull;
 
-import com.gmail.nossr50.config.AdvancedConfig;
-import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.skills.AbilityType;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.datatypes.skills.ToolType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.runnables.skills.BleedTimerTask;
-import com.gmail.nossr50.skills.SkillManager;
-import com.gmail.nossr50.util.Permissions;
-import com.gmail.nossr50.util.player.UserManager;
-import com.gmail.nossr50.util.skills.CombatUtils;
-import com.gmail.nossr50.util.skills.SkillUtils;
+import java.util.Map;
 
 public class SwordsManager extends SkillManager {
     public SwordsManager(McMMOPlayer mcMMOPlayer) {
-        super(mcMMOPlayer, SkillType.SWORDS);
+        super(mcMMOPlayer, PrimarySkillType.SWORDS);
     }
 
     public boolean canActivateAbility() {
-        return mcMMOPlayer.getToolPreparationMode(ToolType.SWORD) && Permissions.serratedStrikes(getPlayer());
+        return mmoPlayer.getToolPreparationMode(ToolType.SWORD) && Permissions.serratedStrikes(getPlayer());
     }
 
-    public boolean canUseBleed() {
-        return Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.BLEED);
+    public boolean canUseStab() {
+        return Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.SWORDS_STAB) && RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.SWORDS_STAB);
+    }
+
+    public boolean canUseRupture() {
+        return Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.SWORDS_RUPTURE) && RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.SWORDS_RUPTURE);
     }
 
     public boolean canUseCounterAttack(Entity target) {
-        return target instanceof LivingEntity && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.COUNTER);
+        if(!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.SWORDS_COUNTER_ATTACK))
+            return false;
+
+        return target instanceof LivingEntity && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.SWORDS_COUNTER_ATTACK);
     }
 
     public boolean canUseSerratedStrike() {
-        return mcMMOPlayer.getAbilityMode(AbilityType.SERRATED_STRIKES) && Permissions.serratedStrikes(getPlayer());
+        if(!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.SWORDS_SERRATED_STRIKES))
+            return false;
+
+        return mmoPlayer.getAbilityMode(SuperAbilityType.SERRATED_STRIKES);
     }
 
     /**
@@ -44,28 +63,79 @@ public class SwordsManager extends SkillManager {
      *
      * @param target The defending entity
      */
-    public void bleedCheck(LivingEntity target) {
-        if (SkillUtils.activationSuccessful(SecondaryAbility.BLEED, getPlayer(), getSkillLevel(), activationChance)) {
+    public void processRupture(@NotNull LivingEntity target) throws IllegalStateException {
+        if(target.hasMetadata(mcMMO.REPLANT_META_KEY)) {
+            if(mmoPlayer.isDebugMode()) {
+                mmoPlayer.getPlayer().sendMessage("Rupture task ongoing for target " + target.toString());
+                RuptureTaskMeta ruptureTaskMeta = (RuptureTaskMeta) target.getMetadata(mcMMO.RUPTURE_META_KEY);
+                RuptureTask ruptureTask = (RuptureTask) target.getMetadata(mcMMO.RUPTURE_META_KEY);
+                mmoPlayer.getPlayer().sendMessage(ruptureTask.toString());
+            }
 
-            if (getSkillLevel() >= AdvancedConfig.getInstance().getMaxBonusLevel(SecondaryAbility.BLEED)) {
-                BleedTimerTask.add(target, Swords.bleedMaxTicks);
-            }
-            else {
-                BleedTimerTask.add(target, Swords.bleedBaseTicks);
-            }
+            return; //Don't apply bleed
+        }
 
-            if (mcMMOPlayer.useChatNotifications()) {
-                getPlayer().sendMessage(LocaleLoader.getString("Swords.Combat.Bleeding"));
-            }
+        if (RandomChanceUtil.isActivationSuccessful(SkillActivationType.RANDOM_LINEAR_100_SCALE_WITH_CAP, SubSkillType.SWORDS_RUPTURE, getPlayer())) {
 
             if (target instanceof Player) {
                 Player defender = (Player) target;
 
-                if (UserManager.getPlayer(defender).useChatNotifications()) {
-                    defender.sendMessage(LocaleLoader.getString("Swords.Combat.Bleeding.Started"));
+                //Don't start or add to a bleed if they are blocking
+                if(defender.isBlocking())
+                    return;
+
+                if (NotificationManager.doesPlayerUseNotifications(defender)) {
+                    NotificationManager.sendPlayerInformation(defender, NotificationType.SUBSKILL_MESSAGE, "Swords.Combat.Bleeding.Started");
                 }
             }
+
+            RuptureTask ruptureTask = new RuptureTask(mmoPlayer, target,
+                    AdvancedConfig.getInstance().getRuptureTickDamage(target instanceof Player, getRuptureRank()),
+                    AdvancedConfig.getInstance().getRuptureExplosionDamage(target instanceof Player, getRuptureRank()));
+
+            RuptureTaskMeta ruptureTaskMeta = new RuptureTaskMeta(mcMMO.p, ruptureTask);
+
+            ruptureTask.runTaskTimer(mcMMO.p, 0, 1);
+            target.setMetadata(mcMMO.RUPTURE_META_KEY, ruptureTaskMeta);
+
+//            if (mmoPlayer.useChatNotifications()) {
+//                NotificationManager.sendPlayerInformation(getPlayer(), NotificationType.SUBSKILL_MESSAGE, "Swords.Combat.Bleeding");
+//            }
         }
+    }
+
+    private int getRuptureRank() {
+        return RankUtils.getRank(getPlayer(), SubSkillType.SWORDS_RUPTURE);
+    }
+
+    public double getStabDamage()
+    {
+        int rank = RankUtils.getRank(getPlayer(), SubSkillType.SWORDS_STAB);
+
+        if(rank > 0)
+        {
+            return (1.0D + (rank * 1.5));
+        }
+
+        return 0;
+    }
+
+    public int getToolTier(@NotNull ItemStack itemStack)
+    {
+        if(ItemUtils.isNetheriteTool(itemStack))
+            return 5;
+        if(ItemUtils.isDiamondTool(itemStack))
+            return 4;
+        else if(ItemUtils.isIronTool(itemStack) || ItemUtils.isGoldTool(itemStack))
+            return 3;
+        else if(ItemUtils.isStoneTool(itemStack))
+            return 2;
+        else
+            return 1;
+    }
+
+    public int getRuptureBleedTicks(boolean isTargetPlayer) {
+        return AdvancedConfig.getInstance().getRuptureDurationSeconds(isTargetPlayer) / RuptureTask.DAMAGE_TICK_INTERVAL;
     }
 
     /**
@@ -74,18 +144,14 @@ public class SwordsManager extends SkillManager {
      * @param attacker The {@link LivingEntity} being affected by the ability
      * @param damage The amount of damage initially dealt by the event
      */
-    public void counterAttackChecks(LivingEntity attacker, double damage) {
-        if (Swords.counterAttackRequiresBlock && !getPlayer().isBlocking()) {
-            return;
-        }
+    public void counterAttackChecks(@NotNull LivingEntity attacker, double damage) {
+        if (RandomChanceUtil.isActivationSuccessful(SkillActivationType.RANDOM_LINEAR_100_SCALE_WITH_CAP, SubSkillType.SWORDS_COUNTER_ATTACK, getPlayer())) {
+            CombatUtils.dealDamage(attacker, damage / Swords.counterAttackModifier, getPlayer());
 
-        if (SkillUtils.activationSuccessful(SecondaryAbility.COUNTER, getPlayer(), getSkillLevel(), activationChance)) {
-            CombatUtils.dealDamage(attacker, damage / Swords.counterAttackModifier);
-
-            getPlayer().sendMessage(LocaleLoader.getString("Swords.Combat.Countered"));
+            NotificationManager.sendPlayerInformation(getPlayer(), NotificationType.SUBSKILL_MESSAGE, "Swords.Combat.Countered");
 
             if (attacker instanceof Player) {
-                ((Player) attacker).sendMessage(LocaleLoader.getString("Swords.Combat.Counter.Hit"));
+                NotificationManager.sendPlayerInformation((Player)attacker, NotificationType.SUBSKILL_MESSAGE, "Swords.Combat.Counter.Hit");
             }
         }
     }
@@ -96,8 +162,7 @@ public class SwordsManager extends SkillManager {
      * @param target The {@link LivingEntity} being affected by the ability
      * @param damage The amount of damage initially dealt by the event
      */
-    public void serratedStrikes(LivingEntity target, double damage) {
-        CombatUtils.applyAbilityAoE(getPlayer(), target, damage / Swords.serratedStrikesModifier, skill);
-        BleedTimerTask.add(target, Swords.serratedStrikesBleedTicks);
+    public void serratedStrikes(@NotNull LivingEntity target, double damage, Map<DamageModifier, Double> modifiers) {
+        CombatUtils.applyAbilityAoE(getPlayer(), target, damage / Swords.serratedStrikesModifier, modifiers, skill);
     }
 }

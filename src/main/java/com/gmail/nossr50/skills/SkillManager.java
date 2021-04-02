@@ -1,35 +1,52 @@
 package com.gmail.nossr50.skills;
 
+import com.gmail.nossr50.datatypes.experience.XPGainReason;
+import com.gmail.nossr50.datatypes.experience.XPGainSource;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 
-import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.util.skills.PerksUtils;
-
 public abstract class SkillManager {
-    protected McMMOPlayer mcMMOPlayer;
-    protected int activationChance;
-    protected SkillType skill;
+    protected McMMOPlayer mmoPlayer;
+    protected PrimarySkillType skill;
 
-    public SkillManager(McMMOPlayer mcMMOPlayer, SkillType skill) {
-        this.mcMMOPlayer = mcMMOPlayer;
-        this.activationChance = PerksUtils.handleLuckyPerks(mcMMOPlayer.getPlayer(), skill);
+    public SkillManager(McMMOPlayer mmoPlayer, PrimarySkillType skill) {
+        this.mmoPlayer = mmoPlayer;
         this.skill = skill;
     }
 
-    public McMMOPlayer getMcMMOPlayer() {
-        return mcMMOPlayer;
-    }
-
     public Player getPlayer() {
-        return mcMMOPlayer.getPlayer();
+        return mmoPlayer.getPlayer();
     }
 
     public int getSkillLevel() {
-        return mcMMOPlayer.getSkillLevel(skill);
+        return mmoPlayer.getSkillLevel(skill);
     }
 
-    public void applyXpGain(float xp) {
-        mcMMOPlayer.beginXpGain(skill, xp);
+    /**
+     * Applies XP to a player, provides SELF as an XpGainSource source
+     * @param xp amount of XP to apply
+     * @param xpGainReason the reason for the XP gain
+     * @deprecated use applyXpGain(float, XPGainReason, XPGainSource)
+     */
+    @Deprecated
+    public void applyXpGain(float xp, XPGainReason xpGainReason) {
+        mmoPlayer.beginXpGain(skill, xp, xpGainReason, XPGainSource.SELF);
+    }
+
+    /**
+     * Applies XP to a player
+     * @param xp amount of XP to apply
+     * @param xpGainReason the reason for the XP gain
+     * @param xpGainSource the source of the XP
+     */
+    public void applyXpGain(float xp, XPGainReason xpGainReason, XPGainSource xpGainSource) {
+        mmoPlayer.beginXpGain(skill, xp, xpGainReason, xpGainSource);
+    }
+
+    public XPGainReason getXPGainReason(LivingEntity target, Entity damager) {
+        return (damager instanceof Player && target instanceof Player) ? XPGainReason.PVP : XPGainReason.PVE;
     }
 }

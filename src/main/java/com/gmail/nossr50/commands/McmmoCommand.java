@@ -1,19 +1,19 @@
 package com.gmail.nossr50.commands;
 
+import com.gmail.nossr50.commands.party.PartySubcommandType;
+import com.gmail.nossr50.config.Config;
+import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.Permissions;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.commands.party.PartySubcommandType;
-import com.gmail.nossr50.config.Config;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.Permissions;
+import org.jetbrains.annotations.NotNull;
 
 public class McmmoCommand implements CommandExecutor {
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, String[] args) {
         switch (args.length) {
             case 0:
                 if (!Permissions.mcmmoDescription(sender)) {
@@ -24,14 +24,18 @@ public class McmmoCommand implements CommandExecutor {
                 String description = LocaleLoader.getString("mcMMO.Description");
                 String[] mcSplit = description.split(",");
                 sender.sendMessage(mcSplit);
+                sender.sendMessage(LocaleLoader.getString("mcMMO.Description.FormerDevs"));
 
                 if (Config.getInstance().getDonateMessageEnabled()) {
                     sender.sendMessage(LocaleLoader.getString("MOTD.Donate"));
-                    sender.sendMessage(ChatColor.GOLD + " - " + ChatColor.GREEN + "gjmcferrin@gmail.com" + ChatColor.GOLD + " Paypal");
+                    sender.sendMessage(ChatColor.GOLD + " - " + ChatColor.GREEN + "nossr50@gmail.com" + ChatColor.GOLD + " Paypal");
                 }
 
-                sender.sendMessage(LocaleLoader.getString("MOTD.Version", mcMMO.p.getDescription().getVersion()));
-                mcMMO.getHolidayManager().anniversaryCheck(sender);
+                if (Permissions.showversion(sender)) {
+                    sender.sendMessage(LocaleLoader.getString("MOTD.Version", mcMMO.p.getDescription().getVersion()));
+                }
+
+//                mcMMO.getHolidayManager().anniversaryCheck(sender);
                 return true;
 
             case 1:
@@ -68,6 +72,10 @@ public class McmmoCommand implements CommandExecutor {
     }
 
     private void displayOtherCommands(CommandSender sender) {
+        //Don't show them this category if they have none of the permissions
+        if(!Permissions.skillreset(sender) && !Permissions.mmoedit(sender) && !Permissions.adminChat(sender) && !Permissions.mcgod(sender))
+            return;
+
         sender.sendMessage(LocaleLoader.getString("Commands.Other"));
 
         if (Permissions.skillreset(sender)) {

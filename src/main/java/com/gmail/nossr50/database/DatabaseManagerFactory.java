@@ -1,8 +1,8 @@
 package com.gmail.nossr50.database;
 
-import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.config.Config;
 import com.gmail.nossr50.datatypes.database.DatabaseType;
+import com.gmail.nossr50.mcMMO;
 
 public class DatabaseManagerFactory {
     private static Class<? extends DatabaseManager> customManager = null;
@@ -23,7 +23,7 @@ public class DatabaseManagerFactory {
             mcMMO.p.debug("Falling back on " + (Config.getInstance().getUseMySQL() ? "SQL" : "Flatfile") + " database");
         }
 
-        return Config.getInstance().getUseMySQL() ? new SQLDatabaseManager() : new FlatfileDatabaseManager();
+        return Config.getInstance().getUseMySQL() ? new SQLDatabaseManager() : new FlatFileDatabaseManager();
     }
 
     /**
@@ -44,7 +44,7 @@ public class DatabaseManagerFactory {
      */
     public static void setCustomDatabaseManagerClass(Class<? extends DatabaseManager> clazz) {
         try {
-            clazz.getConstructor((Class<?>) null);
+            clazz.getConstructor();
             customManager = clazz;
         }
         catch (Throwable e) {
@@ -59,13 +59,16 @@ public class DatabaseManagerFactory {
     public static DatabaseManager createDatabaseManager(DatabaseType type) {
         switch (type) {
             case FLATFILE:
-                return new FlatfileDatabaseManager();
+                mcMMO.p.getLogger().info("Using FlatFile Database");
+                return new FlatFileDatabaseManager();
 
             case SQL:
+                mcMMO.p.getLogger().info("Using SQL Database");
                 return new SQLDatabaseManager();
 
             case CUSTOM:
                 try {
+                    mcMMO.p.getLogger().info("Attempting to use Custom Database");
                     return createDefaultCustomDatabaseManager();
                 }
                 catch (Throwable e) {
@@ -78,10 +81,10 @@ public class DatabaseManagerFactory {
     }
 
     public static DatabaseManager createDefaultCustomDatabaseManager() throws Throwable {
-        return customManager.getConstructor((Class<?>) null).newInstance((Object[]) null);
+        return customManager.getConstructor().newInstance();
     }
 
     public static DatabaseManager createCustomDatabaseManager(Class<? extends DatabaseManager> clazz) throws Throwable {
-        return clazz.getConstructor((Class<?>) null).newInstance((Object[]) null);
+        return clazz.getConstructor().newInstance();
     }
 }

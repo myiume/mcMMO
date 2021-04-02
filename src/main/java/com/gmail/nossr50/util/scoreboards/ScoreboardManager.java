@@ -1,33 +1,36 @@
 package com.gmail.nossr50.util.scoreboards;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.bukkit.ChatColor;
-import org.bukkit.OfflinePlayer;
-import org.bukkit.entity.Player;
-import org.bukkit.scoreboard.DisplaySlot;
-import org.bukkit.scoreboard.Objective;
-
-import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.config.Config;
 import com.gmail.nossr50.datatypes.database.PlayerStat;
 import com.gmail.nossr50.datatypes.player.McMMOPlayer;
 import com.gmail.nossr50.datatypes.player.PlayerProfile;
-import com.gmail.nossr50.datatypes.skills.AbilityType;
-import com.gmail.nossr50.datatypes.skills.SkillType;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SuperAbilityType;
+import com.gmail.nossr50.events.scoreboard.McMMOScoreboardMakeboardEvent;
+import com.gmail.nossr50.events.scoreboard.ScoreboardEventReason;
 import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.util.Misc;
 import com.gmail.nossr50.util.player.UserManager;
-
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.entity.Player;
+import org.bukkit.scoreboard.DisplaySlot;
+import org.bukkit.scoreboard.Objective;
+import org.bukkit.scoreboard.Scoreboard;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import java.util.*;
+
+/**
+ * Manages the Scoreboards used to display a variety of mcMMO related information to the player
+ */
 public class ScoreboardManager {
-    static final Map<String, ScoreboardWrapper> PLAYER_SCOREBOARDS = new HashMap<String, ScoreboardWrapper>();
+    static final Map<String, ScoreboardWrapper> PLAYER_SCOREBOARDS = new HashMap<>();
 
     // do not localize; these are internal identifiers
     static final String SIDEBAR_OBJECTIVE = "mcmmo_sidebar";
@@ -40,22 +43,35 @@ public class ScoreboardManager {
 
     static final String POWER_LEVEL = LocaleLoader.getString("Scoreboard.Misc.PowerLevel");
 
-    static final OfflinePlayer LABEL_POWER_LEVEL = getOfflinePlayer(POWER_LEVEL);
-    static final OfflinePlayer LABEL_LEVEL = getOfflinePlayer(LocaleLoader.getString("Scoreboard.Misc.Level"));
-    static final OfflinePlayer LABEL_CURRENT_XP = getOfflinePlayer(LocaleLoader.getString("Scoreboard.Misc.CurrentXP"));
-    static final OfflinePlayer LABEL_REMAINING_XP = getOfflinePlayer(LocaleLoader.getString("Scoreboard.Misc.RemainingXP"));
-    static final OfflinePlayer LABEL_ABILITY_COOLDOWN = getOfflinePlayer(LocaleLoader.getString("Scoreboard.Misc.Cooldown"));
-    static final OfflinePlayer LABEL_OVERALL = getOfflinePlayer(LocaleLoader.getString("Scoreboard.Misc.Overall"));
+    static final String LABEL_POWER_LEVEL = POWER_LEVEL;
+    static final String LABEL_LEVEL = LocaleLoader.getString("Scoreboard.Misc.Level");
+    static final String LABEL_CURRENT_XP = LocaleLoader.getString("Scoreboard.Misc.CurrentXP");
+    static final String LABEL_REMAINING_XP = LocaleLoader.getString("Scoreboard.Misc.RemainingXP");
+//    static final String LABEL_ABILITY_COOLDOWN = LocaleLoader.getString("Scoreboard.Misc.Cooldown");
+//    static final String LABEL_OVERALL = LocaleLoader.getString("Scoreboard.Misc.Overall");
 
-    static final Map<SkillType, OfflinePlayer>   skillLabels;
-    static final Map<AbilityType, OfflinePlayer> abilityLabelsColored;
-    static final Map<AbilityType, OfflinePlayer> abilityLabelsSkill;
+    static final Map<PrimarySkillType, String>   skillLabels;
+    static final Map<SuperAbilityType, String> abilityLabelsColored;
+    static final Map<SuperAbilityType, String> abilityLabelsSkill;
 
+    public static final String DISPLAY_NAME = "powerLevel";
+
+    /*
+     * Initializes the static properties of this class
+     */
     static {
-        ImmutableMap.Builder<SkillType, OfflinePlayer> skillLabelBuilder = ImmutableMap.builder();
-        ImmutableMap.Builder<AbilityType, OfflinePlayer> abilityLabelBuilder = ImmutableMap.builder();
-        ImmutableMap.Builder<AbilityType, OfflinePlayer> abilityLabelSkillBuilder = ImmutableMap.builder();
+        /*
+         * We need immutable objects for our Scoreboard's labels
+         */
+        ImmutableMap.Builder<PrimarySkillType, String> skillLabelBuilder = ImmutableMap.builder();
+        ImmutableMap.Builder<SuperAbilityType, String> abilityLabelBuilder = ImmutableMap.builder();
+        ImmutableMap.Builder<SuperAbilityType, String> abilityLabelSkillBuilder = ImmutableMap.builder();
 
+        /*
+         * Builds the labels for our ScoreBoards
+         * Stylizes the targetBoard in a Rainbow Pattern
+         * This is off by default
+         */
         if (Config.getInstance().getScoreboardRainbows()) {
             // Everything but black, gray, gold
             List<ChatColor> colors = Lists.newArrayList(
@@ -76,38 +92,44 @@ public class ScoreboardManager {
             Collections.shuffle(colors, Misc.getRandom());
 
             int i = 0;
-            for (SkillType type : SkillType.values()) {
+            for (PrimarySkillType type : PrimarySkillType.values()) {
                 // Include child skills
-                skillLabelBuilder.put(type, getOfflinePlayer(colors.get(i) + type.getName()));
+                skillLabelBuilder.put(type, getShortenedName(colors.get(i) + type.getName(), false));
 
                 if (type.getAbility() != null) {
-                    abilityLabelBuilder.put(type.getAbility(), getOfflinePlayer(colors.get(i) + type.getAbility().getName()));
+                    abilityLabelBuilder.put(type.getAbility(), getShortenedName(colors.get(i) + type.getAbility().getLocalizedName()));
 
-                    if (type == SkillType.MINING) {
-                        abilityLabelBuilder.put(AbilityType.BLAST_MINING, getOfflinePlayer(colors.get(i) + AbilityType.BLAST_MINING.getName()));
+                    if (type == PrimarySkillType.MINING) {
+                        abilityLabelBuilder.put(SuperAbilityType.BLAST_MINING, getShortenedName(colors.get(i) + SuperAbilityType.BLAST_MINING.getLocalizedName()));
                     }
                 }
 
-                if (++i == colors.size()) i = 0;
+                if (++i == colors.size()) {
+                    i = 0;
+                }
             }
         }
+        /*
+         * Builds the labels for our ScoreBoards
+         * Stylizes the targetBoard using our normal color scheme
+         */
         else {
-            for (SkillType type : SkillType.values()) {
+            for (PrimarySkillType type : PrimarySkillType.values()) {
                 // Include child skills
-                skillLabelBuilder.put(type, getOfflinePlayer(ChatColor.GREEN + type.getName()));
+                skillLabelBuilder.put(type, getShortenedName(ChatColor.GREEN + type.getName()));
 
                 if (type.getAbility() != null) {
-                    abilityLabelBuilder.put(type.getAbility(), getOfflinePlayerDots(ChatColor.AQUA + type.getAbility().getName()));
+                    abilityLabelBuilder.put(type.getAbility(), formatAbility(type.getAbility().getLocalizedName()));
 
-                    if (type == SkillType.MINING) {
-                        abilityLabelBuilder.put(AbilityType.BLAST_MINING, getOfflinePlayerDots(ChatColor.AQUA + AbilityType.BLAST_MINING.getName()));
+                    if (type == PrimarySkillType.MINING) {
+                        abilityLabelBuilder.put(SuperAbilityType.BLAST_MINING, formatAbility(SuperAbilityType.BLAST_MINING.getLocalizedName()));
                     }
                 }
             }
         }
 
-        for (AbilityType type : AbilityType.values()) {
-            abilityLabelSkillBuilder.put(type, getOfflinePlayerDots((type == AbilityType.BLAST_MINING ? ChatColor.BLUE : ChatColor.AQUA) + type.getName()));
+        for (SuperAbilityType type : SuperAbilityType.values()) {
+            abilityLabelSkillBuilder.put(type, formatAbility((type == SuperAbilityType.BLAST_MINING ? ChatColor.BLUE : ChatColor.AQUA), type.getLocalizedName()));
         }
 
         skillLabels = skillLabelBuilder.build();
@@ -115,23 +137,7 @@ public class ScoreboardManager {
         abilityLabelsSkill = abilityLabelSkillBuilder.build();
     }
 
-    private static List<String> dirtyPowerLevels = new ArrayList<String>();
-
-    private static OfflinePlayer getOfflinePlayer(String name) {
-        return getOfflinePlayer(name, false);
-    }
-
-    private static OfflinePlayer getOfflinePlayerDots(String name) {
-        return getOfflinePlayer(name, true);
-    }
-
-    private static OfflinePlayer getOfflinePlayer(String name, boolean useDots) {
-        if (name.length() > 16) {
-            name = useDots ? name.substring(0, 14) + ".." : name.substring(0, 16);
-        }
-
-        return mcMMO.p.getServer().getOfflinePlayer(name);
-    }
+    private static final List<String> dirtyPowerLevels = new ArrayList<>();
 
     public enum SidebarType {
         NONE,
@@ -139,30 +145,67 @@ public class ScoreboardManager {
         STATS_BOARD,
         COOLDOWNS_BOARD,
         RANK_BOARD,
-        TOP_BOARD;
+        TOP_BOARD
+    }
+
+    private static String formatAbility(String abilityName) {
+        return formatAbility(ChatColor.AQUA, abilityName);
+    }
+
+    private static String formatAbility(ChatColor color, String abilityName) {
+        if (Config.getInstance().getShowAbilityNames()) {
+            return getShortenedName(color + abilityName);
+        }
+        else {
+            return color + LocaleLoader.getString("Scoreboard.Misc.Ability");
+        }
+    }
+
+    private static String getShortenedName(String name) {
+        return getShortenedName(name, true);
+    }
+
+    private static String getShortenedName(String name, boolean useDots) {
+        if (name.length() > 16) {
+            name = useDots ? name.substring(0, 14) + ".." : name.substring(0, 16);
+        }
+
+        return name;
     }
 
     // **** Listener call-ins **** //
 
     // Called by PlayerJoinEvent listener
     public static void setupPlayer(Player player) {
-        PLAYER_SCOREBOARDS.put(player.getName(), ScoreboardWrapper.create(player));
+        teardownPlayer(player);
+
+        PLAYER_SCOREBOARDS.put(player.getName(), makeNewScoreboard(player));
         dirtyPowerLevels.add(player.getName());
     }
 
-    // Called by PlayerQuitEvent listener
+    // Called by PlayerQuitEvent listener and OnPlayerTeleport under certain circumstances
     public static void teardownPlayer(Player player) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.remove(player.getName());
+        if(player == null)
+            return;
 
-        if (wrapper != null && wrapper.revertTask != null) {
-            wrapper.revertTask.cancel();
+        //Hacky world blacklist fix
+        if(player.isOnline() && player.isValid()) {
+            if(Bukkit.getServer().getScoreboardManager() != null)
+                player.setScoreboard(Bukkit.getServer().getScoreboardManager().getMainScoreboard());
+        }
+
+        if(getWrapper(player) != null) {
+            ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.remove(player.getName());
+            if(wrapper.revertTask != null) {
+                wrapper.revertTask.cancel();
+            }
         }
     }
 
     // Called in onDisable()
     public static void teardownAll() {
-        Player[] onlinePlayers = mcMMO.p.getServer().getOnlinePlayers();
-        mcMMO.p.debug("Tearing down scoreboards... (" + onlinePlayers.length + ")");
+        ImmutableList<Player> onlinePlayers = ImmutableList.copyOf(mcMMO.p.getServer().getOnlinePlayers());
+        mcMMO.p.debug("Tearing down scoreboards... (" + onlinePlayers.size() + ")");
         for (Player player : onlinePlayers) {
             teardownPlayer(player);
         }
@@ -178,36 +221,44 @@ public class ScoreboardManager {
     }
 
     // Called by internal level-up event listener
-    public static void handleLevelUp(Player player, SkillType skill) {
+    public static void handleLevelUp(Player player, PrimarySkillType skill) {
         // Selfboards
-        ScoreboardWrapper selfboardWrapper = PLAYER_SCOREBOARDS.get(player.getName());
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        if ((selfboardWrapper.isSkillScoreboard() && selfboardWrapper.targetSkill == skill) || (selfboardWrapper.isStatsScoreboard()) && selfboardWrapper.isBoardShown()) {
-            selfboardWrapper.doSidebarUpdateSoon();
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
         }
 
-        // Otherboards
-        String playerName = player.getName();
-
-        for (ScoreboardWrapper wrapper : PLAYER_SCOREBOARDS.values()) {
-            if (wrapper.isStatsScoreboard() && playerName.equals(wrapper.targetPlayer) && selfboardWrapper.isBoardShown()) {
-                selfboardWrapper.doSidebarUpdateSoon();
+        if(wrapper != null) {
+            if ((wrapper.isSkillScoreboard() && wrapper.targetSkill == skill) || (wrapper.isStatsScoreboard()) && wrapper.isBoardShown()) {
+                wrapper.doSidebarUpdateSoon();
             }
-        }
 
-        if (Config.getInstance().getPowerLevelTagsEnabled() && !dirtyPowerLevels.contains(playerName)) {
-            dirtyPowerLevels.add(playerName);
-        }
+            // Otherboards
+            String playerName = player.getName();
 
-        if (Config.getInstance().getSkillLevelUpBoard()) {
-            enablePlayerSkillLevelUpScoreboard(player, skill);
+            for (ScoreboardWrapper iWrapper : PLAYER_SCOREBOARDS.values()) {
+                if (iWrapper.isStatsScoreboard() && playerName.equals(iWrapper.targetPlayer) && wrapper.isBoardShown()) {
+                    wrapper.doSidebarUpdateSoon();
+                }
+            }
+
+            if (Config.getInstance().getPowerLevelTagsEnabled() && !dirtyPowerLevels.contains(playerName)) {
+                dirtyPowerLevels.add(playerName);
+            }
+
+            if (Config.getInstance().getSkillLevelUpBoard()) {
+                enablePlayerSkillLevelUpScoreboard(player, skill);
+            }
+
         }
     }
 
     // Called by internal xp event listener
-    public static void handleXp(Player player, SkillType skill) {
+    public static void handleXp(Player player, PrimarySkillType skill) {
         // Selfboards
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+        ScoreboardWrapper wrapper = getWrapper(player);
 
         if (wrapper != null && wrapper.isSkillScoreboard() && wrapper.targetSkill == skill && wrapper.isBoardShown()) {
             wrapper.doSidebarUpdateSoon();
@@ -215,42 +266,83 @@ public class ScoreboardManager {
     }
 
     // Called by internal ability event listeners
-    public static void cooldownUpdate(Player player, SkillType skill) {
+    public static void cooldownUpdate(Player player, PrimarySkillType skill) {
         // Selfboards
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        if (wrapper != null && (wrapper.isCooldownScoreboard() || wrapper.isSkillScoreboard() && wrapper.targetSkill == skill) && wrapper.isBoardShown()) {
-            wrapper.doSidebarUpdateSoon();
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
+
+        if(wrapper != null) {
+            if ((wrapper.isCooldownScoreboard() || wrapper.isSkillScoreboard() && wrapper.targetSkill == skill) && wrapper.isBoardShown()) {
+                wrapper.doSidebarUpdateSoon();
+            }
         }
     }
 
     // **** Setup methods **** //
 
-    public static void enablePlayerSkillScoreboard(Player player, SkillType skill) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+    public static void enablePlayerSkillScoreboard(Player player, PrimarySkillType skill) {
+        McMMOPlayer mmoPlayer = UserManager.getPlayer(player);
+        mmoPlayer.setLastSkillShownScoreboard(skill);
 
-        wrapper.setOldScoreboard();
-        wrapper.setTypeSkill(skill);
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        changeScoreboard(wrapper, Config.getInstance().getSkillScoreboardTime());
-    }
-
-    public static void enablePlayerSkillLevelUpScoreboard(Player player, SkillType skill) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
-
-        // Do NOT run if already shown
-        if (wrapper.isBoardShown()) {
-            return;
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
         }
 
-        wrapper.setOldScoreboard();
-        wrapper.setTypeSkill(skill);
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeSkill(skill);
 
-        changeScoreboard(wrapper, Config.getInstance().getSkillLevelUpTime());
+            changeScoreboard(wrapper, Config.getInstance().getSkillScoreboardTime());
+        }
+    }
+
+    public static void retryLastSkillBoard(Player player) {
+        McMMOPlayer mmoPlayer = UserManager.getPlayer(player);
+        PrimarySkillType primarySkillType = mmoPlayer.getLastSkillShownScoreboard();
+
+        ScoreboardWrapper wrapper = getWrapper(player);
+
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
+
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeSkill(primarySkillType);
+
+            changeScoreboard(wrapper, Config.getInstance().getSkillScoreboardTime());
+        }
+    }
+
+    public static void enablePlayerSkillLevelUpScoreboard(Player player, PrimarySkillType skill) {
+        ScoreboardWrapper wrapper = getWrapper(player);
+
+        // Do NOT run if already shown
+        if (wrapper != null && wrapper.isBoardShown()) {
+
+            if(wrapper.isBoardShown())
+                return;
+
+            wrapper.setOldScoreboard();
+            wrapper.setTypeSkill(skill);
+            changeScoreboard(wrapper, Config.getInstance().getSkillLevelUpTime());
+        }
     }
 
     public static void enablePlayerStatsScoreboard(Player player) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+        ScoreboardWrapper wrapper = getWrapper(player);
+
+        if(wrapper == null)
+            return;
+
 
         wrapper.setOldScoreboard();
         wrapper.setTypeSelfStats();
@@ -258,62 +350,129 @@ public class ScoreboardManager {
         changeScoreboard(wrapper, Config.getInstance().getStatsScoreboardTime());
     }
 
-    public static void enablePlayerInspectScoreboard(Player player, PlayerProfile targetProfile) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+    public static void enablePlayerInspectScoreboard(@NotNull Player player, @NotNull PlayerProfile targetProfile) {
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        wrapper.setOldScoreboard();
-        wrapper.setTypeInspectStats(targetProfile);
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
 
-        changeScoreboard(wrapper, Config.getInstance().getInspectScoreboardTime());
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeInspectStats(targetProfile);
+
+            changeScoreboard(wrapper, Config.getInstance().getInspectScoreboardTime());
+        }
+    }
+
+    public static void enablePlayerInspectScoreboard(@NotNull Player player, @NotNull McMMOPlayer targetMcMMOPlayer) {
+        ScoreboardWrapper wrapper = getWrapper(player);
+
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
+
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeInspectStats(targetMcMMOPlayer);
+
+            changeScoreboard(wrapper, Config.getInstance().getInspectScoreboardTime());
+        }
     }
 
     public static void enablePlayerCooldownScoreboard(Player player) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        wrapper.setOldScoreboard();
-        wrapper.setTypeCooldowns();
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
 
-        changeScoreboard(wrapper, Config.getInstance().getCooldownScoreboardTime());
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeCooldowns();
+
+            changeScoreboard(wrapper, Config.getInstance().getCooldownScoreboardTime());
+        }
     }
 
-    public static void showPlayerRankScoreboard(Player player, Map<SkillType, Integer> rank) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+    public static void showPlayerRankScoreboard(Player player, Map<PrimarySkillType, Integer> rank) {
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        wrapper.setOldScoreboard();
-        wrapper.setTypeSelfRank();
-        wrapper.acceptRankData(rank);
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
 
-        changeScoreboard(wrapper, Config.getInstance().getRankScoreboardTime());
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeSelfRank();
+            wrapper.acceptRankData(rank);
+
+            changeScoreboard(wrapper, Config.getInstance().getRankScoreboardTime());
+        }
     }
 
-    public static void showPlayerRankScoreboardOthers(Player player, String targetName, Map<SkillType, Integer> rank) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+    public static void showPlayerRankScoreboardOthers(Player player, String targetName, Map<PrimarySkillType, Integer> rank) {
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        wrapper.setOldScoreboard();
-        wrapper.setTypeInspectRank(targetName);
-        wrapper.acceptRankData(rank);
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
 
-        changeScoreboard(wrapper, Config.getInstance().getRankScoreboardTime());
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeInspectRank(targetName);
+            wrapper.acceptRankData(rank);
+
+            changeScoreboard(wrapper, Config.getInstance().getRankScoreboardTime());
+        }
     }
 
-    public static void showTopScoreboard(Player player, SkillType skill, int pageNumber, List<PlayerStat> stats) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+    public static void showTopScoreboard(Player player, PrimarySkillType skill, int pageNumber, List<PlayerStat> stats) {
 
-        wrapper.setOldScoreboard();
-        wrapper.setTypeTop(skill, pageNumber);
-        wrapper.acceptLeaderboardData(stats);
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        changeScoreboard(wrapper, Config.getInstance().getTopScoreboardTime());
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
+
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeTop(skill, pageNumber);
+            wrapper.acceptLeaderboardData(stats);
+
+            changeScoreboard(wrapper, Config.getInstance().getTopScoreboardTime());
+        }
     }
 
     public static void showTopPowerScoreboard(Player player, int pageNumber, List<PlayerStat> stats) {
-        ScoreboardWrapper wrapper = PLAYER_SCOREBOARDS.get(player.getName());
+        ScoreboardWrapper wrapper = getWrapper(player);
 
-        wrapper.setOldScoreboard();
-        wrapper.setTypeTopPower(pageNumber);
-        wrapper.acceptLeaderboardData(stats);
+        if(wrapper == null) {
+            setupPlayer(player);
+            wrapper = getWrapper(player);
+        }
 
-        changeScoreboard(wrapper, Config.getInstance().getTopScoreboardTime());
+        if(wrapper != null) {
+            wrapper.setOldScoreboard();
+            wrapper.setTypeTopPower(pageNumber);
+            wrapper.acceptLeaderboardData(stats);
+
+            changeScoreboard(wrapper, Config.getInstance().getTopScoreboardTime());
+        }
+    }
+
+    public static @Nullable ScoreboardWrapper getWrapper(Player player) {
+        if(PLAYER_SCOREBOARDS.get(player.getName()) == null) {
+            makeNewScoreboard(player);
+        }
+
+        return PLAYER_SCOREBOARDS.get(player.getName());
     }
 
     // **** Helper methods **** //
@@ -329,7 +488,7 @@ public class ScoreboardManager {
         }
 
         for (String playerName : dirtyPowerLevels) {
-            McMMOPlayer mcMMOPlayer = UserManager.getPlayer(playerName, true);
+            McMMOPlayer mcMMOPlayer = UserManager.getPlayer(playerName);
 
             if (mcMMOPlayer == null) {
                 continue;
@@ -338,7 +497,7 @@ public class ScoreboardManager {
             Player player = mcMMOPlayer.getPlayer();
             int power = mcMMOPlayer.getPowerLevel();
 
-            mainObjective.getScore(player).setScore(power);
+            mainObjective.getScore(playerName).setScore(power);
 
             for (ScoreboardWrapper wrapper : PLAYER_SCOREBOARDS.values()) {
                 wrapper.updatePowerLevel(player, power);
@@ -350,29 +509,36 @@ public class ScoreboardManager {
     }
 
     /**
-     * Gets or creates the power level objective on the main scoreboard.
-     * <p>
+     * Gets or creates the power level objective on the main targetBoard.
+     * <p/>
      * If power levels are disabled, the objective is deleted and null is
      * returned.
      *
-     * @return the main scoreboard objective, or null if disabled
+     * @return the main targetBoard objective, or null if disabled
      */
-    public static Objective getPowerLevelObjective() {
+    public static @Nullable Objective getPowerLevelObjective() {
         if (!Config.getInstance().getPowerLevelTagsEnabled()) {
-            Objective objective = mcMMO.p.getServer().getScoreboardManager().getMainScoreboard().getObjective(POWER_OBJECTIVE);
+            if(getScoreboardManager() == null)
+                return null;
+
+            Objective objective = getScoreboardManager().getMainScoreboard().getObjective(POWER_OBJECTIVE);
 
             if (objective != null) {
                 objective.unregister();
-                mcMMO.p.debug("Removed leftover scoreboard objects from Power Level Tags.");
+                mcMMO.p.debug("Removed leftover targetBoard objects from Power Level Tags.");
             }
 
             return null;
         }
 
-        Objective powerObjective = mcMMO.p.getServer().getScoreboardManager().getMainScoreboard().getObjective(POWER_OBJECTIVE);
+
+        if(getScoreboardManager() ==  null)
+            return null;
+
+        Objective powerObjective = getScoreboardManager().getMainScoreboard().getObjective(POWER_OBJECTIVE);
 
         if (powerObjective == null) {
-            powerObjective = mcMMO.p.getServer().getScoreboardManager().getMainScoreboard().registerNewObjective(POWER_OBJECTIVE, "dummy");
+            powerObjective = getScoreboardManager().getMainScoreboard().registerNewObjective(POWER_OBJECTIVE, "dummy", DISPLAY_NAME);
             powerObjective.setDisplayName(TAG_POWER_LEVEL);
             powerObjective.setDisplaySlot(DisplaySlot.BELOW_NAME);
         }
@@ -380,7 +546,11 @@ public class ScoreboardManager {
         return powerObjective;
     }
 
-    private static void changeScoreboard(ScoreboardWrapper wrapper, int displayTime) {
+    public @Nullable static org.bukkit.scoreboard.ScoreboardManager getScoreboardManager() {
+        return mcMMO.p.getServer().getScoreboardManager();
+    }
+
+    public static void changeScoreboard(ScoreboardWrapper wrapper, int displayTime) {
         if (displayTime == -1) {
             wrapper.showBoardWithNoRevert();
         }
@@ -403,5 +573,17 @@ public class ScoreboardManager {
 
     public static void setRevertTimer(String playerName, int seconds) {
         PLAYER_SCOREBOARDS.get(playerName).showBoardAndScheduleRevert(seconds * Misc.TICK_CONVERSION_FACTOR);
+    }
+
+    public static @Nullable ScoreboardWrapper makeNewScoreboard(Player player) {
+        if(getScoreboardManager() == null)
+            return null;
+
+        //Call our custom event
+        Scoreboard scoreboard = getScoreboardManager().getNewScoreboard();
+        McMMOScoreboardMakeboardEvent event = new McMMOScoreboardMakeboardEvent(scoreboard, player.getScoreboard(), player, ScoreboardEventReason.CREATING_NEW_SCOREBOARD);
+        player.getServer().getPluginManager().callEvent(event);
+        //Use the values from the event
+        return new ScoreboardWrapper(event.getTargetPlayer(), event.getTargetBoard());
     }
 }

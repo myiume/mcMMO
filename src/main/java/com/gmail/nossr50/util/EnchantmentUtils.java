@@ -1,12 +1,12 @@
 package com.gmail.nossr50.util;
 
-import java.util.HashMap;
-
 import org.bukkit.enchantments.Enchantment;
+
+import java.util.HashMap;
 
 public class EnchantmentUtils {
 
-    private static final HashMap<String, Enchantment> enchants = new HashMap<String, Enchantment>();
+    private static final HashMap<String, Enchantment> enchants = new HashMap<>();
 
     static {
         enchants.put("SHARPNESS", Enchantment.DAMAGE_ALL);
@@ -31,6 +31,9 @@ public class EnchantmentUtils {
         enchants.put("FLAME", Enchantment.ARROW_FIRE);
         enchants.put("KNOCKBACK", Enchantment.KNOCKBACK);
         enchants.put("THORNS", Enchantment.THORNS);
+        enchants.put("MENDING", Enchantment.MENDING);
+        enchants.put("DEPTH_STRIDER", Enchantment.DEPTH_STRIDER);
+        enchants.put("FROST_WALKER", Enchantment.FROST_WALKER);
     }
 
     /**
@@ -45,6 +48,6 @@ public class EnchantmentUtils {
             return enchants.get(enchantmentName);
         }
 
-        return null;
+        return Enchantment.getByName(enchantmentName);
     }
 }

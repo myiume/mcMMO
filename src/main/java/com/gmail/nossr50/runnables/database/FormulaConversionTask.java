@@ -1,22 +1,21 @@
 package com.gmail.nossr50.runnables.database;
 
-import org.bukkit.command.CommandSender;
-import org.bukkit.scheduler.BukkitRunnable;
-
-import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.config.experience.ExperienceConfig;
 import com.gmail.nossr50.database.DatabaseManager;
 import com.gmail.nossr50.datatypes.experience.FormulaType;
 import com.gmail.nossr50.datatypes.player.McMMOPlayer;
 import com.gmail.nossr50.datatypes.player.PlayerProfile;
-import com.gmail.nossr50.datatypes.skills.SkillType;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
 import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.util.Misc;
 import com.gmail.nossr50.util.player.UserManager;
+import org.bukkit.command.CommandSender;
+import org.bukkit.scheduler.BukkitRunnable;
 
 public class FormulaConversionTask extends BukkitRunnable {
-    private CommandSender sender;
-    private FormulaType formulaType;
+    private final CommandSender sender;
+    private final FormulaType formulaType;
 
     public FormulaConversionTask(CommandSender sender, FormulaType formulaType) {
         this.sender = sender;
@@ -28,12 +27,12 @@ public class FormulaConversionTask extends BukkitRunnable {
         int convertedUsers = 0;
         long startMillis = System.currentTimeMillis();
         for (String playerName : mcMMO.getDatabaseManager().getStoredUsers()) {
-            McMMOPlayer mcMMOPlayer = UserManager.getPlayer(playerName, true);
+            McMMOPlayer mcMMOPlayer = UserManager.getOfflinePlayer(playerName);
             PlayerProfile profile;
 
             // If the mcMMOPlayer doesn't exist, create a temporary profile and check if it's present in the database. If it's not, abort the process.
             if (mcMMOPlayer == null) {
-                profile = mcMMO.getDatabaseManager().loadPlayerProfile(playerName, false);
+                profile = mcMMO.getDatabaseManager().loadPlayerProfile(playerName);
 
                 if (!profile.isLoaded()) {
                     mcMMO.p.debug("Profile not loaded.");
@@ -41,7 +40,8 @@ public class FormulaConversionTask extends BukkitRunnable {
                 }
 
                 editValues(profile);
-                profile.save(); // Since this is a temporary profile, we save it here.
+                // Since this is a temporary profile, we save it here.
+                profile.scheduleAsyncSave();
             }
             else {
                 profile = mcMMOPlayer.getProfile();
@@ -58,20 +58,20 @@ public class FormulaConversionTask extends BukkitRunnable {
     private void editValues(PlayerProfile profile) {
         mcMMO.p.debug("========================================================================");
         mcMMO.p.debug("Conversion report for " + profile.getPlayerName() + ":");
-        for (SkillType skillType : SkillType.NON_CHILD_SKILLS) {
-            int oldLevel = profile.getSkillLevel(skillType);
-            int oldXPLevel = profile.getSkillXpLevel(skillType);
+        for (PrimarySkillType primarySkillType : PrimarySkillType.NON_CHILD_SKILLS) {
+            int oldLevel = profile.getSkillLevel(primarySkillType);
+            int oldXPLevel = profile.getSkillXpLevel(primarySkillType);
             int totalOldXP = mcMMO.getFormulaManager().calculateTotalExperience(oldLevel, oldXPLevel);
 
             if (totalOldXP == 0) {
                 continue;
             }
 
-            int[] newExperienceValues = mcMMO.getFormulaManager().calculateNewLevel(skillType, (int) Math.floor(totalOldXP / ExperienceConfig.getInstance().getExpModifier()), formulaType);
+            int[] newExperienceValues = mcMMO.getFormulaManager().calculateNewLevel(primarySkillType, (int) Math.floor(totalOldXP / ExperienceConfig.getInstance().getExpModifier()), formulaType);
             int newLevel = newExperienceValues[0];
             int newXPlevel = newExperienceValues[1];
 
-            mcMMO.p.debug("  Skill: " + skillType.toString());
+            mcMMO.p.debug("  Skill: " + primarySkillType.toString());
 
             mcMMO.p.debug("    OLD:");
             mcMMO.p.debug("      Level: " + oldLevel);
@@ -83,8 +83,8 @@ public class FormulaConversionTask extends BukkitRunnable {
             mcMMO.p.debug("      XP " + newXPlevel);
             mcMMO.p.debug("------------------------------------------------------------------------");
 
-            profile.modifySkill(skillType, newLevel);
-            profile.setSkillXpLevel(skillType, newXPlevel);
+            profile.modifySkill(primarySkillType, newLevel);
+            profile.setSkillXpLevel(primarySkillType, newXPlevel);
         }
     }
 }

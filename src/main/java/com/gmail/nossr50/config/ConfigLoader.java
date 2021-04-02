@@ -1,17 +1,16 @@
 package com.gmail.nossr50.config;
 
-import java.io.File;
-import java.util.List;
-
+import com.gmail.nossr50.mcMMO;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 
-import com.gmail.nossr50.mcMMO;
+import java.io.File;
+import java.util.List;
 
 public abstract class ConfigLoader {
     protected static final mcMMO plugin = mcMMO.p;
     protected String fileName;
-    private File configFile;
+    protected final File configFile;
     protected FileConfiguration config;
 
     public ConfigLoader(String relativePath, String fileName) {

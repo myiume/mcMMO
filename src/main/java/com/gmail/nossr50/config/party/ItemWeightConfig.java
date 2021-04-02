@@ -1,11 +1,11 @@
 package com.gmail.nossr50.config.party;
 
-import java.util.HashSet;
-
+import com.gmail.nossr50.config.ConfigLoader;
+import com.gmail.nossr50.util.text.StringUtils;
 import org.bukkit.Material;
 
-import com.gmail.nossr50.config.ConfigLoader;
-import com.gmail.nossr50.util.StringUtils;
+import java.util.HashSet;
+import java.util.Locale;
 
 public class ItemWeightConfig extends ConfigLoader {
     private static ItemWeightConfig instance;
@@ -27,10 +27,10 @@ public class ItemWeightConfig extends ConfigLoader {
     }
 
     public HashSet<Material> getMiscItems() {
-        HashSet<Material> miscItems = new HashSet<Material>();
+        HashSet<Material> miscItems = new HashSet<>();
 
         for (String item : config.getStringList("Party_Shareables.Misc_Items")) {
-            Material material = Material.getMaterial(item.toUpperCase());
+            Material material = Material.getMaterial(item.toUpperCase(Locale.ENGLISH));
 
             if (material != null) {
                 miscItems.add(material);

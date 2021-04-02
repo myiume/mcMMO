@@ -15,7 +15,7 @@ public class ArmorConfigManager {
         ModManager modManager = mcMMO.getModManager();
 
         if (!vanilla.exists()) {
-            plugin.saveResource(plugin.getDataFolder().getName() + File.separator + "armor.default.yml", false);
+            plugin.saveResource(vanilla.getParentFile().getName() + File.separator + "armor.default.yml", false);
         }
 
         for (String fileName : dataFolder.list()) {

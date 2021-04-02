@@ -1,23 +1,13 @@
 package com.gmail.nossr50.commands.party.teleport;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabExecutor;
-import org.bukkit.entity.Player;
-import org.bukkit.util.StringUtil;
-
+import com.gmail.nossr50.config.Config;
+import com.gmail.nossr50.config.WorldBlacklist;
 import com.gmail.nossr50.datatypes.party.Party;
 import com.gmail.nossr50.datatypes.party.PartyFeature;
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.Config;
 import com.gmail.nossr50.datatypes.party.PartyTeleportRecord;
 import com.gmail.nossr50.datatypes.player.McMMOPlayer;
 import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.party.PartyManager;
 import com.gmail.nossr50.runnables.items.TeleportationWarmup;
 import com.gmail.nossr50.util.EventUtils;
@@ -26,24 +16,64 @@ import com.gmail.nossr50.util.Permissions;
 import com.gmail.nossr50.util.commands.CommandUtils;
 import com.gmail.nossr50.util.player.UserManager;
 import com.gmail.nossr50.util.skills.SkillUtils;
-
+import com.gmail.nossr50.worldguard.WorldGuardManager;
+import com.gmail.nossr50.worldguard.WorldGuardUtils;
 import com.google.common.collect.ImmutableList;
+import org.bukkit.World;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabExecutor;
+import org.bukkit.entity.Player;
+import org.bukkit.util.StringUtil;
+import org.jetbrains.annotations.NotNull;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class PtpCommand implements TabExecutor {
     public static final List<String> TELEPORT_SUBCOMMANDS = ImmutableList.of("toggle", "accept", "acceptany", "acceptall");
 
-    private CommandExecutor ptpToggleCommand = new PtpToggleCommand();
-    private CommandExecutor ptpAcceptAnyCommand = new PtpAcceptAnyCommand();
-    private CommandExecutor ptpAcceptCommand = new PtpAcceptCommand();
+    private final CommandExecutor ptpToggleCommand = new PtpToggleCommand();
+    private final CommandExecutor ptpAcceptAnyCommand = new PtpAcceptAnyCommand();
+    private final CommandExecutor ptpAcceptCommand = new PtpAcceptCommand();
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, String[] args) {
         if (CommandUtils.noConsoleUsage(sender)) {
             return true;
         }
 
         Player player = (Player) sender;
+
+        /* WORLD GUARD MAIN FLAG CHECK */
+        if(WorldGuardUtils.isWorldGuardLoaded())
+        {
+            if(!WorldGuardManager.getInstance().hasMainFlag(player))
+                return true;
+        }
+
+        /* WORLD BLACKLIST CHECK */
+        if(WorldBlacklist.isWorldBlacklisted(player.getWorld()))
+            return true;
+
+        if (!UserManager.hasPlayerDataKey(player)) {
+            return true;
+        }
+
+        if(UserManager.getPlayer((Player) sender) == null)
+        {
+            sender.sendMessage(LocaleLoader.getString("Profile.PendingLoad"));
+            return true;
+        }
+
         McMMOPlayer mcMMOPlayer = UserManager.getPlayer(player);
+
+        if (!mcMMOPlayer.inParty()) {
+            sender.sendMessage(LocaleLoader.getString("Commands.Party.None"));
+            return true;
+        }
+
         Party party = mcMMOPlayer.getParty();
 
         if (party.getLevel() < Config.getInstance().getPartyFeatureUnlockLevel(PartyFeature.TELEPORT)) {
@@ -51,72 +81,79 @@ public class PtpCommand implements TabExecutor {
             return true;
         }
 
-        switch (args.length) {
-            case 1:
-                if (args[0].equalsIgnoreCase("toggle")) {
-                    return ptpToggleCommand.onCommand(sender, command, label, args);
-                }
+        if (args.length == 1) {
+            if (args[0].equalsIgnoreCase("toggle")) {
+                return ptpToggleCommand.onCommand(sender, command, label, args);
+            }
 
-                if (args[0].equalsIgnoreCase("acceptany") || args[0].equalsIgnoreCase("acceptall")) {
-                    return ptpAcceptAnyCommand.onCommand(sender, command, label, args);
-                }
+            if (args[0].equalsIgnoreCase("acceptany") || args[0].equalsIgnoreCase("acceptall")) {
+                return ptpAcceptAnyCommand.onCommand(sender, command, label, args);
+            }
 
-                long recentlyHurt = mcMMOPlayer.getRecentlyHurt();
-                int hurtCooldown = Config.getInstance().getPTPCommandRecentlyHurtCooldown();
+            long recentlyHurt = mcMMOPlayer.getRecentlyHurt();
+            int hurtCooldown = Config.getInstance().getPTPCommandRecentlyHurtCooldown();
 
-                if (hurtCooldown > 0) {
-                    int timeRemaining = SkillUtils.calculateTimeLeft(recentlyHurt * Misc.TIME_CONVERSION_FACTOR, hurtCooldown, player);
+            if (hurtCooldown > 0) {
+                int timeRemaining = SkillUtils.calculateTimeLeft(recentlyHurt * Misc.TIME_CONVERSION_FACTOR, hurtCooldown, player);
 
-                    if (timeRemaining > 0) {
-                        player.sendMessage(LocaleLoader.getString("Item.Injured.Wait", timeRemaining));
-                        return true;
-                    }
-                }
-
-                if (args[0].equalsIgnoreCase("accept")) {
-                    return ptpAcceptCommand.onCommand(sender, command, label, args);
-                }
-
-                if (!Permissions.partyTeleportSend(sender)) {
-                    sender.sendMessage(command.getPermissionMessage());
+                if (timeRemaining > 0) {
+                    player.sendMessage(LocaleLoader.getString("Item.Injured.Wait", timeRemaining));
                     return true;
                 }
+            }
 
-                int ptpCooldown = Config.getInstance().getPTPCommandCooldown();
-                long ptpLastUse = mcMMOPlayer.getPartyTeleportRecord().getLastUse();
+            if (args[0].equalsIgnoreCase("accept")) {
+                return ptpAcceptCommand.onCommand(sender, command, label, args);
+            }
 
-                if (ptpCooldown > 0) {
-                    int timeRemaining = SkillUtils.calculateTimeLeft(ptpLastUse * Misc.TIME_CONVERSION_FACTOR, ptpCooldown, player);
-
-                    if (timeRemaining > 0) {
-                        player.sendMessage(LocaleLoader.getString("Item.Generic.Wait", timeRemaining));
-                        return true;
-                    }
-                }
-
-                sendTeleportRequest(sender, player, CommandUtils.getMatchedPlayerName(args[0]));
+            if (!Permissions.partyTeleportSend(sender)) {
+                sender.sendMessage(command.getPermissionMessage());
                 return true;
+            }
 
-            default:
-                return false;
+            int ptpCooldown = Config.getInstance().getPTPCommandCooldown();
+            long ptpLastUse = mcMMOPlayer.getPartyTeleportRecord().getLastUse();
+
+            if (ptpCooldown > 0) {
+                int timeRemaining = SkillUtils.calculateTimeLeft(ptpLastUse * Misc.TIME_CONVERSION_FACTOR, ptpCooldown, player);
+
+                if (timeRemaining > 0) {
+                    player.sendMessage(LocaleLoader.getString("Item.Generic.Wait", timeRemaining));
+                    return true;
+                }
+            }
+
+            sendTeleportRequest(sender, player, CommandUtils.getMatchedPlayerName(args[0]));
+            return true;
         }
+        return false;
     }
 
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        switch (args.length) {
-            case 1:
-                List<String> matches = StringUtil.copyPartialMatches(args[0], TELEPORT_SUBCOMMANDS, new ArrayList<String>(TELEPORT_SUBCOMMANDS.size()));
+    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, String[] args) {
+        if (args.length == 1) {
+            List<String> matches = StringUtil.copyPartialMatches(args[0], TELEPORT_SUBCOMMANDS, new ArrayList<>(TELEPORT_SUBCOMMANDS.size()));
 
-                if (matches.size() == 0) {
-                    Set<String> playerNames = UserManager.getPlayerNames();
-                    return StringUtil.copyPartialMatches(args[0], playerNames, new ArrayList<String>(playerNames.size()));
+            if (matches.size() == 0) {
+                if (UserManager.getPlayer((Player) sender) == null) {
+                    sender.sendMessage(LocaleLoader.getString("Profile.PendingLoad"));
+                    return ImmutableList.of();
                 }
 
-                return matches;
-            default:
-                return ImmutableList.of();
+                Player player = (Player) sender;
+                McMMOPlayer mcMMOPlayer = UserManager.getPlayer(player);
+
+                if (!mcMMOPlayer.inParty()) {
+                    return ImmutableList.of();
+                }
+
+                List<String> playerNames = mcMMOPlayer.getParty().getOnlinePlayerNames(player);
+                return StringUtil.copyPartialMatches(args[0], playerNames, new ArrayList<>(playerNames.size()));
+            }
+
+            return matches;
         }
+        return ImmutableList.of();
     }
 
     private void sendTeleportRequest(CommandSender sender, Player player, String targetName) {
@@ -126,6 +163,23 @@ public class PtpCommand implements TabExecutor {
 
         McMMOPlayer mcMMOTarget = UserManager.getPlayer(targetName);
         Player target = mcMMOTarget.getPlayer();
+
+
+        if (Config.getInstance().getPTPCommandWorldPermissions()) {
+            World targetWorld = target.getWorld();
+            World playerWorld = player.getWorld();
+
+            if (!Permissions.partyTeleportAllWorlds(player)) {
+                if (!Permissions.partyTeleportWorld(target, targetWorld)) {
+                    player.sendMessage(LocaleLoader.getString("Commands.ptp.NoWorldPermissions", targetWorld.getName()));
+                    return;
+                }
+                else if (targetWorld != playerWorld && !Permissions.partyTeleportWorld(player, targetWorld)) {
+                    player.sendMessage(LocaleLoader.getString("Commands.ptp.NoWorldPermissions", targetWorld.getName()));
+                    return;
+                }
+            }
+        }
 
         PartyTeleportRecord ptpRecord = mcMMOTarget.getPartyTeleportRecord();
 
@@ -176,6 +230,18 @@ public class PtpCommand implements TabExecutor {
     }
 
     protected static void handleTeleportWarmup(Player teleportingPlayer, Player targetPlayer) {
+        if(UserManager.getPlayer(targetPlayer) == null)
+        {
+            targetPlayer.sendMessage(LocaleLoader.getString("Profile.PendingLoad"));
+            return;
+        }
+
+        if(UserManager.getPlayer(teleportingPlayer) == null)
+        {
+            teleportingPlayer.sendMessage(LocaleLoader.getString("Profile.PendingLoad"));
+            return;
+        }
+
         McMMOPlayer mcMMOPlayer = UserManager.getPlayer(teleportingPlayer);
         McMMOPlayer mcMMOTarget = UserManager.getPlayer(targetPlayer);
 

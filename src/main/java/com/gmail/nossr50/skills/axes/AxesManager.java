@@ -1,64 +1,79 @@
 package com.gmail.nossr50.skills.axes;
 
-import org.bukkit.entity.LivingEntity;
-import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-
-import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.config.AdvancedConfig;
+import com.gmail.nossr50.datatypes.interactions.NotificationType;
 import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.skills.AbilityType;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.datatypes.skills.SuperAbilityType;
 import com.gmail.nossr50.datatypes.skills.ToolType;
-import com.gmail.nossr50.events.skills.secondaryabilities.SecondaryAbilityWeightedActivationCheckEvent;
-import com.gmail.nossr50.locale.LocaleLoader;
 import com.gmail.nossr50.skills.SkillManager;
 import com.gmail.nossr50.util.ItemUtils;
-import com.gmail.nossr50.util.Misc;
 import com.gmail.nossr50.util.Permissions;
-import com.gmail.nossr50.util.player.UserManager;
-import com.gmail.nossr50.util.skills.CombatUtils;
-import com.gmail.nossr50.util.skills.ParticleEffectUtils;
-import com.gmail.nossr50.util.skills.SkillUtils;
+import com.gmail.nossr50.util.player.NotificationManager;
+import com.gmail.nossr50.util.random.RandomChanceUtil;
+import com.gmail.nossr50.util.skills.*;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageEvent.DamageModifier;
+import org.bukkit.inventory.ItemStack;
+import org.jetbrains.annotations.NotNull;
+
+import java.util.Map;
 
 public class AxesManager extends SkillManager {
     public AxesManager(McMMOPlayer mcMMOPlayer) {
-        super(mcMMOPlayer, SkillType.AXES);
+        super(mcMMOPlayer, PrimarySkillType.AXES);
     }
 
     public boolean canUseAxeMastery() {
-        return Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.AXE_MASTERY);
+        if(!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.AXES_AXE_MASTERY))
+            return false;
+
+        return Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.AXES_AXE_MASTERY);
     }
 
-    public boolean canCriticalHit(LivingEntity target) {
-        return target.isValid() && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.CRITICAL_HIT);
+    public boolean canCriticalHit(@NotNull LivingEntity target) {
+        if(!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.AXES_CRITICAL_STRIKES))
+            return false;
+
+        return target.isValid() && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.AXES_CRITICAL_STRIKES);
     }
 
-    public boolean canImpact(LivingEntity target) {
-        return target.isValid() && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.ARMOR_IMPACT) && Axes.hasArmor(target);
+    public boolean canImpact(@NotNull LivingEntity target) {
+        if(!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.AXES_ARMOR_IMPACT))
+            return false;
+
+        return target.isValid() && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.AXES_ARMOR_IMPACT) && Axes.hasArmor(target);
     }
 
-    public boolean canGreaterImpact(LivingEntity target) {
-        return target.isValid() && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.GREATER_IMPACT) && !Axes.hasArmor(target);
+    public boolean canGreaterImpact(@NotNull LivingEntity target) {
+        if(!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.AXES_GREATER_IMPACT))
+            return false;
+
+        return target.isValid() && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.AXES_GREATER_IMPACT) && !Axes.hasArmor(target);
     }
 
-    public boolean canUseSkullSplitter(LivingEntity target) {
-        return target.isValid() && mcMMOPlayer.getAbilityMode(AbilityType.SKULL_SPLITTER) && Permissions.skullSplitter(getPlayer());
+    public boolean canUseSkullSplitter(@NotNull LivingEntity target) {
+        if(!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.AXES_SKULL_SPLITTER))
+            return false;
+
+        return target.isValid() && mmoPlayer.getAbilityMode(SuperAbilityType.SKULL_SPLITTER) && Permissions.skullSplitter(getPlayer());
     }
 
     public boolean canActivateAbility() {
-        return mcMMOPlayer.getToolPreparationMode(ToolType.AXE) && Permissions.skullSplitter(getPlayer());
+        return mmoPlayer.getToolPreparationMode(ToolType.AXE) && Permissions.skullSplitter(getPlayer());
     }
 
     /**
      * Handle the effects of the Axe Mastery ability
-     *
-     * @param target The {@link LivingEntity} being affected by the ability
      */
-    public double axeMastery(LivingEntity target) {
-        double axeBonus = Math.min(getSkillLevel() / (Axes.axeMasteryMaxBonusLevel / Axes.axeMasteryMaxBonus), Axes.axeMasteryMaxBonus);
+    public double axeMastery() {
+        if (!RandomChanceUtil.isActivationSuccessful(SkillActivationType.ALWAYS_FIRES, SubSkillType.AXES_AXE_MASTERY, getPlayer())) {
+            return 0;
+        }
 
-        return CombatUtils.callFakeDamageEvent(getPlayer(), target, axeBonus);
+        return Axes.getAxeMasteryBonusDamage(getPlayer());
     }
 
     /**
@@ -68,16 +83,22 @@ public class AxesManager extends SkillManager {
      * @param damage The amount of damage initially dealt by the event
      */
     public double criticalHit(LivingEntity target, double damage) {
-        if (!SkillUtils.activationSuccessful(SecondaryAbility.CRITICAL_HIT, getPlayer(), getSkillLevel(), activationChance)) {
+        if (!RandomChanceUtil.isActivationSuccessful(SkillActivationType.RANDOM_LINEAR_100_SCALE_WITH_CAP, SubSkillType.AXES_CRITICAL_STRIKES, getPlayer())) {
             return 0;
         }
 
         Player player = getPlayer();
 
-        player.sendMessage(LocaleLoader.getString("Axes.Combat.CriticalHit"));
+        if (mmoPlayer.useChatNotifications()) {
+            NotificationManager.sendPlayerInformation(player, NotificationType.SUBSKILL_MESSAGE, "Axes.Combat.CriticalHit");
+        }
 
         if (target instanceof Player) {
-            ((Player) target).sendMessage(LocaleLoader.getString("Axes.Combat.CritStruck"));
+            Player defender = (Player) target;
+
+            if (NotificationManager.doesPlayerUseNotifications(defender)) {
+                NotificationManager.sendPlayerInformation(defender, NotificationType.SUBSKILL_MESSAGE, "Axes.Combat.CritStruck");
+            }
 
             damage = (damage * Axes.criticalHitPVPModifier) - damage;
         }
@@ -85,7 +106,7 @@ public class AxesManager extends SkillManager {
             damage = (damage * Axes.criticalHitPVEModifier) - damage;
         }
 
-        return CombatUtils.callFakeDamageEvent(player, target, damage);
+        return damage;
     }
 
     /**
@@ -93,19 +114,20 @@ public class AxesManager extends SkillManager {
      *
      * @param target The {@link LivingEntity} being affected by Impact
      */
-    public void impactCheck(LivingEntity target) {
-        int durabilityDamage = 1 + (getSkillLevel() / Axes.impactIncreaseLevel);
+    public void impactCheck(@NotNull LivingEntity target) {
+        double durabilityDamage = getImpactDurabilityDamage();
 
         for (ItemStack armor : target.getEquipment().getArmorContents()) {
-            if (ItemUtils.isArmor(armor)) {
-                double chance = Axes.impactChance / activationChance;
-                SecondaryAbilityWeightedActivationCheckEvent event = new SecondaryAbilityWeightedActivationCheckEvent(getPlayer(), SecondaryAbility.ARMOR_IMPACT, chance);
-                mcMMO.p.getServer().getPluginManager().callEvent(event);
-                if ((event.getChance() * activationChance) > Misc.getRandom().nextInt(activationChance)) {
-                    SkillUtils.handleDurabilityChange(armor, durabilityDamage, Axes.impactMaxDurabilityModifier);
+            if (armor != null && ItemUtils.isArmor(armor)) {
+                if (RandomChanceUtil.isActivationSuccessful(SkillActivationType.RANDOM_STATIC_CHANCE, SubSkillType.AXES_ARMOR_IMPACT, getPlayer())) {
+                    SkillUtils.handleDurabilityChange(armor, durabilityDamage, 1);
                 }
             }
         }
+    }
+
+    public double getImpactDurabilityDamage() {
+        return AdvancedConfig.getInstance().getImpactDurabilityDamageMultiplier() * RankUtils.getRank(getPlayer(), SubSkillType.AXES_ARMOR_IMPACT);
     }
 
     /**
@@ -113,11 +135,9 @@ public class AxesManager extends SkillManager {
      *
      * @param target The {@link LivingEntity} being affected by the ability
      */
-    public double greaterImpact(LivingEntity target) {
-        double chance = Axes.greaterImpactChance / activationChance;
-        SecondaryAbilityWeightedActivationCheckEvent event = new SecondaryAbilityWeightedActivationCheckEvent(getPlayer(), SecondaryAbility.GREATER_IMPACT, chance);
-        mcMMO.p.getServer().getPluginManager().callEvent(event);
-        if ((event.getChance() * activationChance) <= Misc.getRandom().nextInt(activationChance)) {
+    public double greaterImpact(@NotNull LivingEntity target) {
+        //static chance (3rd param)
+        if (!RandomChanceUtil.isActivationSuccessful(SkillActivationType.RANDOM_STATIC_CHANCE, SubSkillType.AXES_GREATER_IMPACT, getPlayer())) {
             return 0;
         }
 
@@ -126,19 +146,19 @@ public class AxesManager extends SkillManager {
         ParticleEffectUtils.playGreaterImpactEffect(target);
         target.setVelocity(player.getLocation().getDirection().normalize().multiply(Axes.greaterImpactKnockbackMultiplier));
 
-        if (mcMMOPlayer.useChatNotifications()) {
-            player.sendMessage(LocaleLoader.getString("Axes.Combat.GI.Proc"));
+        if (mmoPlayer.useChatNotifications()) {
+            NotificationManager.sendPlayerInformation(player, NotificationType.SUBSKILL_MESSAGE, "Axes.Combat.GI.Proc");
         }
 
         if (target instanceof Player) {
             Player defender = (Player) target;
 
-            if (UserManager.getPlayer(defender).useChatNotifications()) {
-                defender.sendMessage(LocaleLoader.getString("Axes.Combat.GI.Struck"));
+            if (NotificationManager.doesPlayerUseNotifications(defender)) {
+                NotificationManager.sendPlayerInformation(defender, NotificationType.SUBSKILL_MESSAGE, "Axes.Combat.GI.Struck");
             }
         }
 
-        return CombatUtils.callFakeDamageEvent(player, target, Axes.greaterImpactBonusDamage);
+        return Axes.greaterImpactBonusDamage;
     }
 
     /**
@@ -147,7 +167,7 @@ public class AxesManager extends SkillManager {
      * @param target The {@link LivingEntity} being affected by the ability
      * @param damage The amount of damage initially dealt by the event
      */
-    public void skullSplitterCheck(LivingEntity target, double damage) {
-        CombatUtils.applyAbilityAoE(getPlayer(), target, damage / Axes.skullSplitterModifier, skill);
+    public void skullSplitterCheck(@NotNull LivingEntity target, double damage, Map<DamageModifier, Double> modifiers) {
+        CombatUtils.applyAbilityAoE(getPlayer(), target, damage / Axes.skullSplitterModifier, modifiers, skill);
     }
 }

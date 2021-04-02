@@ -15,7 +15,7 @@ public class BlockConfigManager {
         ModManager modManager = mcMMO.getModManager();
 
         if (!vanilla.exists()) {
-            plugin.saveResource(plugin.getDataFolder().getName() + File.separator + "blocks.default.yml", false);
+            plugin.saveResource(vanilla.getParentFile().getName() + File.separator + "blocks.default.yml", false);
         }
 
         for (String fileName : dataFolder.list()) {

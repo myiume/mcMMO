@@ -1,8 +1,25 @@
 package com.gmail.nossr50.listeners;
 
-import java.util.List;
-
+import com.gmail.nossr50.config.Config;
+import com.gmail.nossr50.config.WorldBlacklist;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.events.fake.FakeBrewEvent;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.runnables.player.PlayerUpdateInventoryTask;
+import com.gmail.nossr50.skills.alchemy.Alchemy;
+import com.gmail.nossr50.skills.alchemy.AlchemyPotionBrewer;
+import com.gmail.nossr50.util.ItemUtils;
+import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.player.UserManager;
+import com.gmail.nossr50.util.skills.SkillUtils;
+import com.gmail.nossr50.worldguard.WorldGuardManager;
+import com.gmail.nossr50.worldguard.WorldGuardUtils;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.BrewingStand;
@@ -12,32 +29,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.CraftItemEvent;
-import org.bukkit.event.inventory.FurnaceBurnEvent;
-import org.bukkit.event.inventory.FurnaceExtractEvent;
-import org.bukkit.event.inventory.FurnaceSmeltEvent;
-import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
-import org.bukkit.event.inventory.InventoryMoveItemEvent;
-import org.bukkit.event.inventory.InventoryOpenEvent;
-import org.bukkit.event.inventory.InventoryType;
-import org.bukkit.inventory.FurnaceInventory;
-import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.metadata.MetadataValue;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.Config;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.runnables.PlayerUpdateInventoryTask;
-import com.gmail.nossr50.skills.alchemy.AlchemyPotionBrewer;
-import com.gmail.nossr50.util.ItemUtils;
-import com.gmail.nossr50.util.Misc;
-import com.gmail.nossr50.util.Permissions;
-import com.gmail.nossr50.util.player.UserManager;
-import com.gmail.nossr50.util.skills.SkillUtils;
+import org.bukkit.event.inventory.*;
+import org.bukkit.inventory.*;
 
 public class InventoryListener implements Listener {
     private final mcMMO plugin;
@@ -46,42 +39,12 @@ public class InventoryListener implements Listener {
         this.plugin = plugin;
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInventoryOpen(InventoryOpenEvent event) {
-        Block furnaceBlock = processInventoryOpenorCloseEvent(event.getInventory());
-
-        if (furnaceBlock == null || furnaceBlock.hasMetadata(mcMMO.furnaceMetadataKey)) {
-            return;
-        }
-
-        HumanEntity player = event.getPlayer();
-
-        if (Misc.isNPCEntity(player)) {
-            return;
-        }
-
-        furnaceBlock.setMetadata(mcMMO.furnaceMetadataKey, UserManager.getPlayer((Player) player).getPlayerMetadata());
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInventoryClose(InventoryCloseEvent event) {
-        Block furnaceBlock = processInventoryOpenorCloseEvent(event.getInventory());
-
-        if (furnaceBlock == null || furnaceBlock.hasMetadata(mcMMO.furnaceMetadataKey)) {
-            return;
-        }
-
-        HumanEntity player = event.getPlayer();
-
-        if (Misc.isNPCEntity(player)) {
-            return;
-        }
-
-        furnaceBlock.removeMetadata(mcMMO.furnaceMetadataKey, plugin);
-    }
-
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onFurnaceBurnEvent(FurnaceBurnEvent event) {
+        /* WORLD BLACKLIST CHECK */
+        if(WorldBlacklist.isWorldBlacklisted(event.getBlock().getWorld()))
+            return;
+
         Block furnaceBlock = event.getBlock();
         BlockState furnaceState = furnaceBlock.getState();
         ItemStack smelting = furnaceState instanceof Furnace ? ((Furnace) furnaceState).getInventory().getSmelting() : null;
@@ -90,137 +53,402 @@ public class InventoryListener implements Listener {
             return;
         }
 
-        Player player = getPlayerFromFurnace(furnaceBlock);
+        Furnace furnace = (Furnace) furnaceState;
 
-        if (Misc.isNPCEntity(player) || !Permissions.secondaryAbilityEnabled(player, SecondaryAbility.FUEL_EFFICIENCY)) {
-            return;
+        OfflinePlayer offlinePlayer = mcMMO.getSmeltingTracker().getFurnaceOwner(furnace);
+
+        if(offlinePlayer != null && offlinePlayer.isOnline()) {
+
+            Player player = Bukkit.getPlayer(offlinePlayer.getUniqueId());
+
+            if(player != null) {
+                if (!Permissions.isSubSkillEnabled(player, SubSkillType.SMELTING_FUEL_EFFICIENCY)) {
+                    return;
+                }
+
+                //Profile doesn't exist
+                if(UserManager.getOfflinePlayer(offlinePlayer) == null)
+                {
+                    return;
+                }
+
+
+                boolean debugMode = player.isOnline() && UserManager.getPlayer(player).isDebugMode();
+
+                if(debugMode) {
+                    player.sendMessage("FURNACE FUEL EFFICIENCY DEBUG REPORT");
+                    player.sendMessage("Furnace - "+furnace.hashCode());
+                    player.sendMessage("Furnace Type: "+furnaceBlock.getType().toString());
+                    player.sendMessage("Burn Length before Fuel Efficiency is applied - "+event.getBurnTime());
+                }
+
+                event.setBurnTime(UserManager.getPlayer(player).getSmeltingManager().fuelEfficiency(event.getBurnTime()));
+
+                if(debugMode) {
+                    player.sendMessage("New Furnace Burn Length (after applying fuel efficiency) "+event.getBurnTime());
+                    player.sendMessage("");
+                }
+            }
         }
 
-        event.setBurnTime(UserManager.getPlayer(player).getSmeltingManager().fuelEfficiency(event.getBurnTime()));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onFurnaceSmeltEvent(FurnaceSmeltEvent event) {
-        Block furnaceBlock = event.getBlock();
+        /* WORLD BLACKLIST CHECK */
+        if(WorldBlacklist.isWorldBlacklisted(event.getBlock().getWorld()))
+            return;
+
+        BlockState blockState = event.getBlock().getState(); //Furnaces can only be cast from a BlockState not a Block
         ItemStack smelting = event.getSource();
 
         if (!ItemUtils.isSmeltable(smelting)) {
             return;
         }
 
-        Player player = getPlayerFromFurnace(furnaceBlock);
+        if(blockState instanceof Furnace) {
+            Furnace furnace = (Furnace) blockState;
+            OfflinePlayer offlinePlayer = mcMMO.getSmeltingTracker().getFurnaceOwner(furnace);
 
-        if (Misc.isNPCEntity(player) || !SkillType.SMELTING.getPermissions(player)) {
-            return;
+            if(offlinePlayer != null) {
+
+                McMMOPlayer offlineProfile = UserManager.getOfflinePlayer(offlinePlayer);
+
+                //Profile doesn't exist
+                if(offlineProfile != null) {
+                    //Process smelting
+                    offlineProfile.getSmeltingManager().smeltProcessing(event, furnace);
+                }
+            }
         }
-
-        event.setResult(UserManager.getPlayer(player).getSmeltingManager().smeltProcessing(smelting, event.getResult()));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onFurnaceExtractEvent(FurnaceExtractEvent event) {
-        Block furnaceBlock = event.getBlock();
-        BlockState furnaceState = furnaceBlock.getState();
-        ItemStack result = furnaceState instanceof Furnace ? ((Furnace) furnaceState).getInventory().getResult() : null;
+        /* WORLD BLACKLIST CHECK */
+        if(WorldBlacklist.isWorldBlacklisted(event.getPlayer().getWorld()))
+            return;
 
-        if (!ItemUtils.isSmelted(result)) {
+        BlockState furnaceBlock = event.getBlock().getState();
+
+        if (!ItemUtils.isSmelted(new ItemStack(event.getItemType(), event.getItemAmount()))) {
             return;
         }
 
-        Player player = getPlayerFromFurnace(furnaceBlock);
+        Player player = event.getPlayer();
 
-        if (Misc.isNPCEntity(player) || !Permissions.vanillaXpBoost(player, SkillType.SMELTING)) {
-            return;
+        if(furnaceBlock instanceof Furnace) {
+            /* WORLD GUARD MAIN FLAG CHECK */
+            if(WorldGuardUtils.isWorldGuardLoaded())
+            {
+                if(!WorldGuardManager.getInstance().hasMainFlag(player))
+                    return;
+            }
+
+            if (!UserManager.hasPlayerDataKey(player) || !Permissions.vanillaXpBoost(player, PrimarySkillType.SMELTING)) {
+                return;
+            }
+
+            //Profile not loaded
+            if(UserManager.getPlayer(player) == null)
+            {
+                return;
+            }
+
+            int xpToDrop = event.getExpToDrop();
+            int exp = UserManager.getPlayer(player).getSmeltingManager().vanillaXPBoost(xpToDrop);
+            event.setExpToDrop(exp);
         }
-
-        event.setExpToDrop(UserManager.getPlayer(player).getSmeltingManager().vanillaXPBoost(event.getExpToDrop()));
     }
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onInventoryClickEventNormal(InventoryClickEvent event) {
-        if (event.getInventory().getType() != InventoryType.BREWING || !(event.getInventory().getHolder() instanceof BrewingStand)) {
+        /* WORLD BLACKLIST CHECK */
+        if(WorldBlacklist.isWorldBlacklisted(event.getWhoClicked().getWorld()))
+            return;
+
+        //We should never care to do processing if the player clicks outside the window
+//        if(isOutsideWindowClick(event))
+//            return;
+
+        Inventory inventory = event.getInventory();
+
+        Player player = ((Player) event.getWhoClicked()).getPlayer();
+
+        if(event.getInventory() instanceof FurnaceInventory)
+        {
+            Furnace furnace = mcMMO.getSmeltingTracker().getFurnaceFromInventory(event.getInventory());
+
+            if (furnace != null)
+            {
+                //Switch owners
+                mcMMO.getSmeltingTracker().processFurnaceOwnership(furnace, player);
+            }
+        }
+
+        if (!(inventory instanceof BrewerInventory)) {
             return;
         }
 
-        if (!(event.getWhoClicked() instanceof Player) || Misc.isNPCEntity(event.getWhoClicked()) || !Permissions.concoctions(event.getWhoClicked())) {
+        InventoryHolder holder = inventory.getHolder();
+
+        if (!(holder instanceof BrewingStand)) {
             return;
         }
 
-        AlchemyPotionBrewer.handleInventoryClick(event);
+        HumanEntity whoClicked = event.getWhoClicked();
+
+        if (!UserManager.hasPlayerDataKey(event.getWhoClicked()) || !Permissions.isSubSkillEnabled(whoClicked, SubSkillType.ALCHEMY_CONCOCTIONS)) {
+            return;
+        }
+
+        /* WORLD GUARD MAIN FLAG CHECK */
+        if(WorldGuardUtils.isWorldGuardLoaded())
+        {
+            if(!WorldGuardManager.getInstance().hasMainFlag(player))
+                return;
+        }
+
+        BrewingStand stand = (BrewingStand) holder;
+        ItemStack clicked = event.getCurrentItem();
+        ItemStack cursor = event.getCursor();
+
+        if ((clicked != null && (clicked.getType() == Material.POTION || clicked.getType() == Material.SPLASH_POTION || clicked.getType() == Material.LINGERING_POTION)) || (cursor != null && (cursor.getType() == Material.POTION || cursor.getType() == Material.SPLASH_POTION || cursor.getType() == Material.LINGERING_POTION))) {
+            AlchemyPotionBrewer.scheduleCheck(player, stand);
+            return;
+        }
+
+        ClickType click = event.getClick();
+        InventoryType.SlotType slot = event.getSlotType();
+
+        if (click.isShiftClick()) {
+            switch (slot) {
+                case FUEL:
+                    AlchemyPotionBrewer.scheduleCheck(player, stand);
+                    return;
+                case CONTAINER:
+                case QUICKBAR:
+                    if (!AlchemyPotionBrewer.isValidIngredient(player, clicked)) {
+                        return;
+                    }
+
+                    if (!AlchemyPotionBrewer.transferItems(event.getView(), event.getRawSlot(), click)) {
+                        return;
+                    }
+
+                    event.setCancelled(true);
+                    AlchemyPotionBrewer.scheduleUpdate(inventory);
+                    AlchemyPotionBrewer.scheduleCheck(player, stand);
+                    return;
+                default:
+            }
+        }
+        else if (slot == InventoryType.SlotType.FUEL) {
+            boolean emptyClicked = AlchemyPotionBrewer.isEmpty(clicked);
+
+            if (AlchemyPotionBrewer.isEmpty(cursor)) {
+                if (emptyClicked && click == ClickType.NUMBER_KEY) {
+                    AlchemyPotionBrewer.scheduleCheck(player, stand);
+                    return;
+                }
+
+                AlchemyPotionBrewer.scheduleCheck(player, stand);
+            }
+            else if (emptyClicked) {
+                if (AlchemyPotionBrewer.isValidIngredient(player, cursor)) {
+                    int amount = cursor.getAmount();
+
+                    if (click == ClickType.LEFT || (click == ClickType.RIGHT && amount == 1)) {
+                        event.setCancelled(true);
+                        event.setCurrentItem(cursor.clone());
+                        event.setCursor(null);
+
+                        AlchemyPotionBrewer.scheduleUpdate(inventory);
+                        AlchemyPotionBrewer.scheduleCheck(player, stand);
+                    }
+                    else if (click == ClickType.RIGHT) {
+                        event.setCancelled(true);
+
+                        ItemStack one = cursor.clone();
+                        one.setAmount(1);
+
+                        ItemStack rest = cursor.clone();
+                        rest.setAmount(amount - 1);
+
+                        event.setCurrentItem(one);
+                        event.setCursor(rest);
+
+                        AlchemyPotionBrewer.scheduleUpdate(inventory);
+                        AlchemyPotionBrewer.scheduleCheck(player, stand);
+                    }
+                }
+            }
+        }
     }
+
+    public boolean isOutsideWindowClick(InventoryClickEvent event) {
+        return event.getHotbarButton() == -1;
+    }
+
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onInventoryDragEvent(InventoryDragEvent event) {
-        if (event.getInventory().getType() != InventoryType.BREWING || !(event.getInventory().getHolder() instanceof BrewingStand)) {
+        /* WORLD BLACKLIST CHECK */
+        if(WorldBlacklist.isWorldBlacklisted(event.getWhoClicked().getWorld()))
+            return;
+
+        Inventory inventory = event.getInventory();
+
+        if (!(inventory instanceof BrewerInventory)) {
             return;
         }
 
-        if (!(event.getWhoClicked() instanceof Player) || Misc.isNPCEntity(event.getWhoClicked()) || !Permissions.concoctions(event.getWhoClicked())) {
+        InventoryHolder holder = inventory.getHolder();
+
+        if (!(holder instanceof BrewingStand)) {
             return;
         }
 
-        AlchemyPotionBrewer.handleInventoryDrag(event);
+        HumanEntity whoClicked = event.getWhoClicked();
+
+        if (!UserManager.hasPlayerDataKey(event.getWhoClicked()) || !Permissions.isSubSkillEnabled(whoClicked, SubSkillType.ALCHEMY_CONCOCTIONS)) {
+            return;
+        }
+
+        if (!event.getInventorySlots().contains(Alchemy.INGREDIENT_SLOT)) {
+            return;
+        }
+
+        ItemStack cursor = event.getCursor();
+        ItemStack ingredient = ((BrewerInventory) inventory).getIngredient();
+
+        if (AlchemyPotionBrewer.isEmpty(ingredient) || ingredient.isSimilar(cursor)) {
+            Player player = (Player) whoClicked;
+
+            /* WORLD GUARD MAIN FLAG CHECK */
+            if(WorldGuardUtils.isWorldGuardLoaded())
+            {
+                if(!WorldGuardManager.getInstance().hasMainFlag(player))
+                    return;
+            }
+
+            if (AlchemyPotionBrewer.isValidIngredient(player, cursor)) {
+                // Not handled: dragging custom ingredients over ingredient slot (does not trigger any event)
+                AlchemyPotionBrewer.scheduleCheck(player, (BrewingStand) holder);
+                return;
+            }
+
+            event.setCancelled(true);
+            AlchemyPotionBrewer.scheduleUpdate(inventory);
+        }
+    }
+
+    // Apparently sometimes vanilla brewing beats our task listener to the actual brew. We handle this by cancelling the vanilla event and finishing our brew ourselves.
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onBrew(BrewEvent event)
+    {
+        /* WORLD BLACKLIST CHECK */
+        if(WorldBlacklist.isWorldBlacklisted(event.getBlock().getWorld()))
+            return;
+
+        if (event instanceof FakeBrewEvent)
+            return;
+        Location location = event.getBlock().getLocation();
+        if (Alchemy.brewingStandMap.containsKey(location)) {
+            Alchemy.brewingStandMap.get(location).finishImmediately();
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onInventoryMoveItemEvent(InventoryMoveItemEvent event) {
-        if (event.getDestination().getType() != InventoryType.BREWING || !(event.getDestination().getHolder() instanceof BrewingStand)) {
+        /* WORLD BLACKLIST CHECK */
+
+        if(event.getSource().getLocation() != null)
+            if(WorldBlacklist.isWorldBlacklisted(event.getSource().getLocation().getWorld()))
+                return;
+
+        Inventory inventory = event.getDestination();
+
+        if (!(inventory instanceof BrewerInventory)) {
             return;
         }
 
-        if (Config.getInstance().getPreventHopperTransfer() && event.getItem() != null && event.getItem().getType() != Material.POTION) {
+        InventoryHolder holder = inventory.getHolder();
+
+        if (!(holder instanceof BrewingStand)) {
+            return;
+        }
+
+        ItemStack item = event.getItem();
+
+        if (Config.getInstance().getPreventHopperTransferIngredients() && item.getType() != Material.POTION && item.getType() != Material.SPLASH_POTION && item.getType() != Material.LINGERING_POTION) {
             event.setCancelled(true);
             return;
         }
 
-        if (Config.getInstance().getEnabledForHoppers()) {
-            AlchemyPotionBrewer.handleInventoryMoveItem(event);
+        if (Config.getInstance().getPreventHopperTransferBottles() && (item.getType() == Material.POTION || item.getType() == Material.SPLASH_POTION || item.getType() == Material.LINGERING_POTION)) {
+            event.setCancelled(true);
+            return;
+        }
+
+        if (Config.getInstance().getEnabledForHoppers() && AlchemyPotionBrewer.isValidIngredient(null, item)) {
+            AlchemyPotionBrewer.scheduleCheck(null, (BrewingStand) holder);
         }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onInventoryClickEvent(InventoryClickEvent event) {
+        if(event.getCurrentItem() == null) {
+            return;
+        }
+
         SkillUtils.removeAbilityBuff(event.getCurrentItem());
+        if (event.getAction() == InventoryAction.HOTBAR_SWAP) {
+            if(isOutsideWindowClick(event))
+                return;
+
+            PlayerInventory playerInventory = event.getWhoClicked().getInventory();
+
+            if(playerInventory.getItem(event.getHotbarButton()) != null)
+                SkillUtils.removeAbilityBuff(playerInventory.getItem(event.getHotbarButton()));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryOpenEvent(InventoryOpenEvent event) {
+        SkillUtils.removeAbilityBuff(event.getPlayer().getInventory().getItemInMainHand());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onCraftItem(CraftItemEvent event) {
+        /* WORLD BLACKLIST CHECK */
+        if(WorldBlacklist.isWorldBlacklisted(event.getWhoClicked().getWorld()))
+            return;
+
         final HumanEntity whoClicked = event.getWhoClicked();
 
-        if (Misc.isNPCEntity(whoClicked) || !(whoClicked instanceof Player)) {
+        if (!whoClicked.hasMetadata(mcMMO.playerDataKey)) {
             return;
         }
 
         ItemStack result = event.getRecipe().getResult();
 
+        //TODO: what is the point of this
         if (!ItemUtils.isMcMMOItem(result)) {
             return;
+        }
+
+        Player player = (Player) whoClicked;
+
+        /* WORLD GUARD MAIN FLAG CHECK */
+        if(WorldGuardUtils.isWorldGuardLoaded())
+        {
+            if(!WorldGuardManager.getInstance().hasMainFlag(player))
+                return;
         }
 
         new PlayerUpdateInventoryTask((Player) whoClicked).runTaskLater(plugin, 0);
     }
 
-    private Block processInventoryOpenorCloseEvent(Inventory inventory) {
-        if (!(inventory instanceof FurnaceInventory)) {
-            return null;
-        }
-
-        Furnace furnace = (Furnace) inventory.getHolder();
-
-        if (furnace == null || furnace.getBurnTime() != 0) {
-            return null;
-        }
-
-        return furnace.getBlock();
-    }
-
-    private Player getPlayerFromFurnace(Block furnaceBlock) {
-        List<MetadataValue> metadata = furnaceBlock.getMetadata(mcMMO.furnaceMetadataKey);
-
-        if (metadata.isEmpty()) {
-            return null;
-        }
-
-        return plugin.getServer().getPlayerExact(metadata.get(0).asString());
-    }
 }

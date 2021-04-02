@@ -1,10 +1,5 @@
 package com.gmail.nossr50.runnables.items;
 
-import org.bukkit.Location;
-import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.scheduler.BukkitRunnable;
-
 import com.gmail.nossr50.config.Config;
 import com.gmail.nossr50.datatypes.player.McMMOPlayer;
 import com.gmail.nossr50.locale.LocaleLoader;
@@ -12,9 +7,13 @@ import com.gmail.nossr50.util.ChimaeraWing;
 import com.gmail.nossr50.util.ItemUtils;
 import com.gmail.nossr50.util.Misc;
 import com.gmail.nossr50.util.skills.SkillUtils;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.scheduler.BukkitRunnable;
 
 public class ChimaeraWingWarmup extends BukkitRunnable {
-    private McMMOPlayer mcMMOPlayer;
+    private final McMMOPlayer mcMMOPlayer;
 
     public ChimaeraWingWarmup(McMMOPlayer mcMMOPlayer) {
         this.mcMMOPlayer = mcMMOPlayer;
@@ -31,10 +30,11 @@ public class ChimaeraWingWarmup extends BukkitRunnable {
 
         if (player.getLocation().distanceSquared(previousLocation) > 1.0 || !player.getInventory().containsAtLeast(ChimaeraWing.getChimaeraWing(0), 1)) {
             player.sendMessage(LocaleLoader.getString("Teleport.Cancelled"));
+            mcMMOPlayer.setTeleportCommenceLocation(null);
             return;
         }
 
-        ItemStack inHand = player.getItemInHand();
+        ItemStack inHand = player.getInventory().getItemInMainHand();
 
         if (!ItemUtils.isChimaeraWing(inHand) || inHand.getAmount() < Config.getInstance().getChimaeraUseCost()) {
             player.sendMessage(LocaleLoader.getString("Skills.NeedMore", LocaleLoader.getString("Item.ChimaeraWing.Name")));
