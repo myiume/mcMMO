@@ -1,5 +1,6 @@
 package com.gmail.nossr50.skills.taming;
 
+import com.gmail.nossr50.mcMMO;
 import org.bukkit.EntityEffect;
 import org.bukkit.entity.AnimalTamer;
 import org.bukkit.entity.EntityType;
@@ -7,32 +8,19 @@ import org.bukkit.entity.Player;
 import org.bukkit.entity.Tameable;
 import org.bukkit.entity.Wolf;
 
-import com.gmail.nossr50.config.AdvancedConfig;
-import com.gmail.nossr50.config.experience.ExperienceConfig;
-import com.gmail.nossr50.locale.LocaleLoader;
-
 public class Taming {
-    public static int environmentallyAwareUnlockLevel = AdvancedConfig.getInstance().getEnviromentallyAwareUnlock();
-    public static int holyHoundUnlockLevel            = AdvancedConfig.getInstance().getHolyHoundUnlock();
+    public static double fastFoodServiceActivationChance = mcMMO.p.getAdvancedConfig()
+            .getFastFoodChance();
 
-    public static int    fastFoodServiceUnlockLevel      = AdvancedConfig.getInstance().getFastFoodUnlock();
-    public static double fastFoodServiceActivationChance = AdvancedConfig.getInstance().getFastFoodChance();
+    public static int goreBleedTicks = 2; //Equivalent to rank 1 in Rupture
+    public static double goreModifier = mcMMO.p.getAdvancedConfig().getGoreModifier();
 
-    public static int    goreBleedTicks    = AdvancedConfig.getInstance().getGoreBleedTicks();
-    public static double goreModifier      = AdvancedConfig.getInstance().getGoreModifier();
+    public static double sharpenedClawsBonusDamage = mcMMO.p.getAdvancedConfig()
+            .getSharpenedClawsBonus();
 
-    public static int    sharpenedClawsUnlockLevel = AdvancedConfig.getInstance().getSharpenedClawsUnlock();
-    public static double sharpenedClawsBonusDamage = AdvancedConfig.getInstance().getSharpenedClawsBonus();
+    public static double shockProofModifier = mcMMO.p.getAdvancedConfig().getShockProofModifier();
 
-    public static int    shockProofUnlockLevel = AdvancedConfig.getInstance().getShockProofUnlock();
-    public static double shockProofModifier    = AdvancedConfig.getInstance().getShockProofModifier();
-
-    public static int    thickFurUnlockLevel = AdvancedConfig.getInstance().getThickFurUnlock();
-    public static double thickFurModifier    = AdvancedConfig.getInstance().getThickFurModifier();
-
-    public static int wolfXp   = ExperienceConfig.getInstance().getTamingXPWolf();
-    public static int ocelotXp = ExperienceConfig.getInstance().getTamingXPOcelot();
-    public static int horseXp  = ExperienceConfig.getInstance().getTamingXPHorse();
+    public static double thickFurModifier = mcMMO.p.getAdvancedConfig().getThickFurModifier();
 
     public static boolean canPreventDamage(Tameable pet, AnimalTamer owner) {
         return pet.isTamed() && owner instanceof Player && pet instanceof Wolf;
@@ -63,13 +51,13 @@ public class Taming {
     protected static String getCallOfTheWildFailureMessage(EntityType type) {
         switch (type) {
             case OCELOT:
-                return LocaleLoader.getString("Taming.Summon.Fail.Ocelot");
+                return "Taming.Summon.Fail.Ocelot";
 
             case WOLF:
-                return LocaleLoader.getString("Taming.Summon.Fail.Wolf");
-                
+                return "Taming.Summon.Fail.Wolf";
+
             case HORSE:
-                return LocaleLoader.getString("Taming.Summon.Fail.Horse");
+                return "Taming.Summon.Fail.Horse";
 
             default:
                 return "";

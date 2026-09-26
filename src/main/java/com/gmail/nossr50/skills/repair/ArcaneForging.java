@@ -1,42 +1,22 @@
 package com.gmail.nossr50.skills.repair;
 
-import com.gmail.nossr50.config.AdvancedConfig;
+import com.gmail.nossr50.mcMMO;
 
 public class ArcaneForging {
-    // The order of the values is extremely important, a few methods depend on it to work properly
-    public enum Tier {
-        EIGHT(8),
-        SEVEN(7),
-        SIX(6),
-        FIVE(5),
-        FOUR(4),
-        THREE(3),
-        TWO(2),
-        ONE(1);
 
-        int numerical;
+    /**
+     * No longer used by mcMMO internally, use the config calls instead.
+     * @see com.gmail.nossr50.config.AdvancedConfig
+     */
+    @Deprecated(since = "2.2.052", forRemoval = true)
+    public static boolean arcaneForgingDowngrades = mcMMO.p.getAdvancedConfig()
+            .getArcaneForgingDowngradeEnabled();
 
-        private Tier(int numerical) {
-            this.numerical = numerical;
-        }
-
-        public int toNumerical() {
-            return numerical;
-        }
-
-        protected int getLevel() {
-            return AdvancedConfig.getInstance().getArcaneForgingRankLevel(this);
-        }
-
-        protected double getKeepEnchantChance() {
-            return AdvancedConfig.getInstance().getArcaneForgingKeepEnchantsChance(this);
-        }
-
-        protected double getDowngradeEnchantChance() {
-            return AdvancedConfig.getInstance().getArcaneForgingDowngradeChance(this);
-        }
-    }
-
-    public static boolean arcaneForgingDowngrades  = AdvancedConfig.getInstance().getArcaneForgingDowngradeEnabled();
-    public static boolean arcaneForgingEnchantLoss = AdvancedConfig.getInstance().getArcaneForgingEnchantLossEnabled();
+    /**
+     * No longer used by mcMMO internally, use the config calls instead.
+     * @see com.gmail.nossr50.config.AdvancedConfig
+     */
+    @Deprecated(since = "2.2.052", forRemoval = true)
+    public static boolean arcaneForgingEnchantLoss = mcMMO.p.getAdvancedConfig()
+            .getArcaneForgingEnchantLossEnabled();
 }

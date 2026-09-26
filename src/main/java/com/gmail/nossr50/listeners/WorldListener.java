@@ -1,24 +1,24 @@
 package com.gmail.nossr50.listeners;
 
-import java.io.File;
-import java.util.ArrayList;
-
+import com.gmail.nossr50.config.PersistentDataConfig;
+import com.gmail.nossr50.config.WorldBlacklist;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.PaperUtil;
+import com.gmail.nossr50.util.blockmeta.McMMORegionBackupStore;
 import org.bukkit.Chunk;
-import org.bukkit.World;
 import org.bukkit.block.BlockState;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.world.ChunkUnloadEvent;
 import org.bukkit.event.world.StructureGrowEvent;
-import org.bukkit.event.world.WorldInitEvent;
+import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.event.world.WorldUnloadEvent;
 
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.util.blockmeta.conversion.BlockStoreConversionMain;
+import java.util.ArrayList;
+import java.util.List;
 
 public class WorldListener implements Listener {
-    private final ArrayList<BlockStoreConversionMain> converters = new ArrayList<BlockStoreConversionMain>();
     private final mcMMO plugin;
 
     public WorldListener(final mcMMO plugin) {
@@ -32,43 +32,63 @@ public class WorldListener implements Listener {
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onStructureGrow(StructureGrowEvent event) {
-        if (!mcMMO.getPlaceStore().isTrue(event.getLocation().getBlock())) {
+        /* WORLD BLACKLIST CHECK */
+        if (WorldBlacklist.isWorldBlacklisted(event.getWorld())) {
             return;
         }
 
-        for (BlockState blockState : event.getBlocks()) {
-            mcMMO.getPlaceStore().setFalse(blockState);
-        }
+        // Using 50 ms later as I do not know of a way to run one tick later (safely)
+        final List<BlockState> states = PaperUtil.isFolia() ? new ArrayList<>(event.getBlocks()) : event.getBlocks();
+        plugin.getFoliaLib().getScheduler().runLater(() -> {
+            for (BlockState blockState : states) {
+                mcMMO.getUserBlockTracker().setEligible(blockState);
+            }
+        }, 1);
     }
 
     /**
-     * Monitor WorldInit events.
+     * Restores mcMMO block-tracker data from the backup store for any world that loads after
+     * plugin enable (Multiverse worlds, lazy-loaded dimensions). Only runs when Paper 26.1+ has
+     * reshaped the world and the in-world {@code mcmmo_regions/} folder is empty; a no-op in
+     * all other cases.
      *
      * @param event The event to watch
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onWorldInit(WorldInitEvent event) {
-        World world = event.getWorld();
-
-        if (!new File(world.getWorldFolder(), "mcmmo_data").exists() || plugin == null) {
+    public void onWorldLoad(WorldLoadEvent event) {
+        if (!PersistentDataConfig.getInstance().useBlockTracker()
+                || !plugin.getGeneralConfig().getRegionDataMigrationBackupsEnabled()) {
             return;
         }
-
-        plugin.getLogger().info("Converting block storage for " + world.getName() + " to a new format.");
-
-        BlockStoreConversionMain converter = new BlockStoreConversionMain(world);
-        converter.run();
-        converters.add(converter);
+        if (WorldBlacklist.isWorldBlacklisted(event.getWorld())) {
+            return;
+        }
+        McMMORegionBackupStore.restoreWorld(event.getWorld(), plugin.getLogger(),
+                plugin.getDataFolder().toPath());
     }
 
     /**
-     * Monitor WorldUnload events.
+     * Flushes chunk-store data for the unloading world and, on Spigot / pre-26.1 Paper layouts
+     * (the "legacy shape"), writes a backup snapshot into the mcMMO plugin data directory so
+     * the block-tracker data survives if a future Paper upgrade deletes the world's old folder
+     * layout. Skipped for worlds already on the Paper 26.1+ layout and for blacklisted worlds.
      *
      * @param event The event to watch
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onWorldUnload(WorldUnloadEvent event) {
-        mcMMO.getPlaceStore().unloadWorld(event.getWorld());
+        /* WORLD BLACKLIST CHECK */
+        if (WorldBlacklist.isWorldBlacklisted(event.getWorld())) {
+            return;
+        }
+
+        mcMMO.getChunkManager().unloadWorld(event.getWorld());
+
+        if (PersistentDataConfig.getInstance().useBlockTracker()
+            && plugin.getGeneralConfig().getRegionDataMigrationBackupsEnabled()) {
+            McMMORegionBackupStore.backupWorld(event.getWorld(), plugin.getLogger(),
+                    plugin.getDataFolder().toPath());
+        }
     }
 
     /**
@@ -78,8 +98,13 @@ public class WorldListener implements Listener {
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onChunkUnload(ChunkUnloadEvent event) {
+        /* WORLD BLACKLIST CHECK */
+        if (WorldBlacklist.isWorldBlacklisted(event.getWorld())) {
+            return;
+        }
+
         Chunk chunk = event.getChunk();
 
-        mcMMO.getPlaceStore().chunkUnloaded(chunk.getX(), chunk.getZ(), event.getWorld());
+        mcMMO.getChunkManager().chunkUnloaded(chunk.getX(), chunk.getZ(), event.getWorld());
     }
 }

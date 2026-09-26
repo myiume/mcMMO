@@ -1,19 +1,67 @@
 package com.gmail.nossr50.config.experience;
 
-import java.util.ArrayList;
-import java.util.List;
+import static com.gmail.nossr50.util.text.ConfigStringUtils.getConfigEntityTypeString;
+import static com.gmail.nossr50.util.text.ConfigStringUtils.getMaterialConfigString;
 
+import com.gmail.nossr50.config.BukkitConfig;
+import com.gmail.nossr50.datatypes.experience.FormulaType;
+import com.gmail.nossr50.datatypes.skills.MaterialType;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.alchemy.PotionStage;
+import com.gmail.nossr50.util.text.StringUtils;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.bukkit.Material;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
 import org.bukkit.entity.EntityType;
 
-import com.gmail.nossr50.config.AutoUpdateConfigLoader;
-import com.gmail.nossr50.datatypes.experience.FormulaType;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.skills.repair.repairables.RepairMaterialType;
-import com.gmail.nossr50.util.StringUtils;
-
-public class ExperienceConfig extends AutoUpdateConfigLoader {
+public class ExperienceConfig extends BukkitConfig {
     private static ExperienceConfig instance;
+    final private Map<PrimarySkillType, Map<Material, Integer>> blockExperienceMap = new HashMap<>();
+
+    /* Values resolved once and reused on the XP hot path; reset by loadKeys() */
+    private FormulaType formulaType;
+    private Boolean cumulativeCurveEnabled;
+    private Double experienceGainsGlobalMultiplier;
+    // Runtime /xprate per-skill overrides indexed by skill ordinal, NaN = no override; the
+    // array is replaced wholesale on writes so XP gain reads never see a half-updated state
+    private double[] skillXpRateOverrides;
+    // When each /xprate rate was set (epoch millis, 0 = never), read only by /xprate show
+    private long globalXpRateSetMillis;
+    private long[] skillXpRateSetMillis;
+    private Double customXpPerkBoost;
+    private Boolean diminishedReturnsEnabled;
+    private Boolean earlyGameBoostEnabled;
+    private Boolean npcInteractionPrevented;
+    private Boolean armorStandInteractionPrevented;
+    private Boolean mannequinInteractionPrevented;
+    private Boolean snowExploitPrevented;
+    private Boolean endermanEndermiteFarmingPrevented;
+    private Boolean pistonCheatingPrevented;
+    private Boolean pistonExploitPrevented;
+    private Boolean stoneLavaFarmingPrevented;
+    private Boolean tallPlantXPLimited;
+    private Float diminishedReturnsCap;
+    private Integer diminishedReturnsTimeInterval;
+    private Boolean experienceBarsEnabled;
+    private final Map<PrimarySkillType, Double> formulaSkillModifiers =
+            new EnumMap<>(PrimarySkillType.class);
+    private final Map<PrimarySkillType, Integer> diminishedReturnsThresholds =
+            new EnumMap<>(PrimarySkillType.class);
+    private final Map<PrimarySkillType, Boolean> experienceBarEnabled =
+            new EnumMap<>(PrimarySkillType.class);
+    private final Map<PrimarySkillType, BarColor> experienceBarColors =
+            new EnumMap<>(PrimarySkillType.class);
+    private final Map<PrimarySkillType, BarStyle> experienceBarStyles =
+            new EnumMap<>(PrimarySkillType.class);
 
     private ExperienceConfig() {
         super("experience.yml");
@@ -23,17 +71,56 @@ public class ExperienceConfig extends AutoUpdateConfigLoader {
     public static ExperienceConfig getInstance() {
         if (instance == null) {
             instance = new ExperienceConfig();
+            for (PrimarySkillType skill : PrimarySkillType.values()) {
+                final Map<Material, Integer> experienceMap = new HashMap<>();
+                instance.blockExperienceMap.put(skill, experienceMap);
+                for (Material material : Material.values()) {
+                    int xp = instance.getConfigXp(skill, material);
+
+                    if (xp > 0) {
+                        experienceMap.put(material, xp);
+                    }
+                }
+
+            }
         }
 
         return instance;
     }
 
     @Override
-    protected void loadKeys() {}
+    protected void loadKeys() {
+        formulaType = null;
+        cumulativeCurveEnabled = null;
+        experienceGainsGlobalMultiplier = null;
+        skillXpRateOverrides = null;
+        globalXpRateSetMillis = 0;
+        skillXpRateSetMillis = null;
+        customXpPerkBoost = null;
+        diminishedReturnsEnabled = null;
+        earlyGameBoostEnabled = null;
+        npcInteractionPrevented = null;
+        armorStandInteractionPrevented = null;
+        mannequinInteractionPrevented = null;
+        snowExploitPrevented = null;
+        endermanEndermiteFarmingPrevented = null;
+        pistonCheatingPrevented = null;
+        pistonExploitPrevented = null;
+        stoneLavaFarmingPrevented = null;
+        tallPlantXPLimited = null;
+        diminishedReturnsCap = null;
+        diminishedReturnsTimeInterval = null;
+        experienceBarsEnabled = null;
+        formulaSkillModifiers.clear();
+        diminishedReturnsThresholds.clear();
+        experienceBarEnabled.clear();
+        experienceBarColors.clear();
+        experienceBarStyles.clear();
+    }
 
     @Override
     protected boolean validateKeys() {
-        List<String> reason = new ArrayList<String>();
+        List<String> reason = new ArrayList<>();
 
         /*
          * FORMULA SETTINGS
@@ -41,7 +128,8 @@ public class ExperienceConfig extends AutoUpdateConfigLoader {
 
         /* Curve values */
         if (getMultiplier(FormulaType.EXPONENTIAL) <= 0) {
-            reason.add("Experience_Formula.Exponential_Values.multiplier should be greater than 0!");
+            reason.add(
+                    "Experience_Formula.Exponential_Values.multiplier should be greater than 0!");
         }
 
         if (getMultiplier(FormulaType.LINEAR) <= 0) {
@@ -67,6 +155,11 @@ public class ExperienceConfig extends AutoUpdateConfigLoader {
             reason.add("Experience_Formula.Mobspawners.Multiplier should be at least 0!");
         }
 
+        /* Bred Mob modifier */
+        if (getBredMobXpMultiplier() < 0) {
+            reason.add("Experience_Formula.Breeding.Multiplier should be at least 0!");
+        }
+
         /* Conversion */
         if (getExpModifier() <= 0) {
             reason.add("Conversion.Exp_Modifier should be greater than 0!");
@@ -77,17 +170,22 @@ public class ExperienceConfig extends AutoUpdateConfigLoader {
          */
 
         /* Alchemy */
-        if (getPotionXP() <= 0) {
-            reason.add("Experience.Alchemy.Potion should be greater than 0!");
+        for (PotionStage potionStage : PotionStage.values()) {
+            if (getPotionXP(potionStage) < 0) {
+                reason.add(
+                        "Experience_Values.Alchemy.Potion_Stage_" + potionStage.toNumerical()
+                                + " should be at least 0!");
+            }
+        }
+
+        /* Archery */
+        if (getArcheryDistanceMultiplier() < 0) {
+            reason.add("Experience_Values.Archery.Distance_Multiplier should be at least 0!");
         }
 
         /* Combat XP Multipliers */
         if (getAnimalsXP() < 0) {
-            reason.add("Experience.Combat.Multiplier.Animals should be at least 0!");
-        }
-
-        if (getWitherSkeletonXP() < 0) {
-            reason.add("Experience.Combat.Multiplier.Wither_Skeleton should be at least 0!");
+            reason.add("Experience_Values.Combat.Multiplier.Animals should be at least 0!");
         }
 
         if (getDodgeXPModifier() < 0) {
@@ -103,131 +201,597 @@ public class ExperienceConfig extends AutoUpdateConfigLoader {
         }
 
         /* Fishing */
-        if (getFishingBaseXP() <= 0) {
-            reason.add("Experience.Fishing.Base should be greater than 0!");
-        }
+        // TODO: Add validation for each fish type once enum is available.
 
         if (getFishingShakeXP() <= 0) {
-            reason.add("Experience.Fishing.Shake should be greater than 0!");
+            reason.add("Experience_Values.Fishing.Shake should be greater than 0!");
         }
 
         /* Repair */
         if (getRepairXPBase() <= 0) {
-            reason.add("Experience.Repair.Base should be greater than 0!");
+            reason.add("Experience_Values.Repair.Base should be greater than 0!");
         }
 
         /* Taming */
-        if (getTamingXPWolf() <= 0) {
-            reason.add("Experience.Taming.Animal_Taming.Wolf should be greater than 0!");
+        if (getTamingXP(EntityType.WOLF) <= 0) {
+            reason.add("Experience_Values.Taming.Animal_Taming.Wolf should be greater than 0!");
         }
 
-        if (getTamingXPOcelot() <= 0) {
-            reason.add("Experience.Taming.Animal_Taming.Ocelot should be greater than 0!");
-        }
-
-        /* Woodcutting */
-        if (getWoodcuttingXPOak() <= 0) {
-            reason.add("Experience.Woodcutting.Oak should be greater than 0!");
-        }
-
-        if (getWoodcuttingXPBirch() <= 0) {
-            reason.add("Experience.Woodcutting.Birch should be greater than 0!");
-        }
-
-        if (getWoodcuttingXPSpruce() <= 0) {
-            reason.add("Experience.Woodcutting.Spruce should be greater than 0!");
-        }
-
-        if (getWoodcuttingXPJungle() <= 0) {
-            reason.add("Experience.Woodcutting.Jungle should be greater than 0!");
-        }
-
-        if (getWoodcuttingXPHugeBrownMushroom() <= 0) {
-            reason.add("Experience.Woodcutting.Huge_Mushroom_Brown should be greater than 0!");
-        }
-
-        if (getWoodcuttingXPHugeRedMushroom() <= 0) {
-            reason.add("Experience.Woodcutting.Huge_Mushroom_Red should be greater than 0!");
+        if (getTamingXP(EntityType.OCELOT) <= 0) {
+            reason.add("Experience_Values.Taming.Animal_Taming.Ocelot should be greater than 0!");
         }
 
         return noErrorsInConfig(reason);
+    }
+
+    public boolean isEarlyGameBoostEnabled() {
+        if (earlyGameBoostEnabled == null) {
+            earlyGameBoostEnabled = config.getBoolean("EarlyGameBoost.Enabled", true);
+        }
+
+        return earlyGameBoostEnabled;
     }
 
     /*
      * FORMULA SETTINGS
      */
 
+    /* EXPLOIT TOGGLES */
+    public boolean isSnowExploitPrevented() {
+        if (snowExploitPrevented == null) {
+            snowExploitPrevented = config.getBoolean("ExploitFix.SnowGolemExcavation", true);
+        }
+
+        return snowExploitPrevented;
+    }
+
+    public boolean isEndermanEndermiteFarmingPrevented() {
+        if (endermanEndermiteFarmingPrevented == null) {
+            endermanEndermiteFarmingPrevented = config.getBoolean(
+                    "ExploitFix.EndermanEndermiteFarms", true);
+        }
+
+        return endermanEndermiteFarmingPrevented;
+    }
+
+    public boolean isPistonCheatingPrevented() {
+        if (pistonCheatingPrevented == null) {
+            pistonCheatingPrevented = config.getBoolean("ExploitFix.PistonCheating", true);
+        }
+
+        return pistonCheatingPrevented;
+    }
+
+    public boolean isPistonExploitPrevented() {
+        if (pistonExploitPrevented == null) {
+            pistonExploitPrevented = config.getBoolean("ExploitFix.Pistons", false);
+        }
+
+        return pistonExploitPrevented;
+    }
+
+    public boolean allowUnsafeEnchantments() {
+        return config.getBoolean("ExploitFix.UnsafeEnchantments", false);
+    }
+
+    public boolean isCOTWBreedingPrevented() {
+        return config.getBoolean("ExploitFix.COTWBreeding", true);
+    }
+
+    public boolean isNPCInteractionPrevented() {
+        if (npcInteractionPrevented == null) {
+            npcInteractionPrevented = config.getBoolean("ExploitFix.PreventPluginNPCInteraction",
+                    true);
+        }
+
+        return npcInteractionPrevented;
+    }
+
+    public boolean isArmorStandInteractionPrevented() {
+        if (armorStandInteractionPrevented == null) {
+            armorStandInteractionPrevented = config.getBoolean(
+                    "ExploitFix.PreventArmorStandInteraction", true);
+        }
+
+        return armorStandInteractionPrevented;
+    }
+
+    public boolean isMannequinInteractionPrevented() {
+        if (mannequinInteractionPrevented == null) {
+            mannequinInteractionPrevented = config.getBoolean(
+                    "ExploitFix.PreventMannequinInteraction", true);
+        }
+
+        return mannequinInteractionPrevented;
+    }
+
+    public boolean isFishingExploitingPrevented() {
+        return config.getBoolean("ExploitFix.Fishing", true);
+    }
+
+    public int getFishingExploitingOptionMoveRange() {
+        return config.getInt("Fishing_ExploitFix_Options.MoveRange", 3);
+    }
+
+    public int getFishingExploitingOptionOverFishLimit() {
+        return config.getInt("Fishing_ExploitFix_Options.OverFishLimit", 10);
+    }
+
+    public boolean isAcrobaticsExploitingPrevented() {
+        return config.getBoolean("ExploitFix.Acrobatics", true);
+    }
+
+    public boolean isAcrobaticsDodgeXpFarmingPrevented() {
+        return config.getBoolean("ExploitFix.AcrobaticsDodgeXpFarming", true);
+    }
+
+    public boolean isTreeFellerXPReduced() {
+        return config.getBoolean("ExploitFix.TreeFellerReducedXP", true);
+    }
+
     /* Curve settings */
-    public FormulaType getFormulaType() { return FormulaType.getFormulaType(config.getString("Experience_Formula.Curve")); }
-    public boolean getCumulativeCurveEnabled() { return config.getBoolean("Experience_Formula.Cumulative_Curve", false); }
+    public FormulaType getFormulaType() {
+        if (formulaType == null) {
+            formulaType = FormulaType.getFormulaType(
+                    config.getString("Experience_Formula.Curve", "LINEAR"));
+        }
+
+        return formulaType;
+    }
+
+    public boolean getCumulativeCurveEnabled() {
+        if (cumulativeCurveEnabled == null) {
+            cumulativeCurveEnabled = config.getBoolean("Experience_Formula.Cumulative_Curve",
+                    false);
+        }
+
+        return cumulativeCurveEnabled;
+    }
 
     /* Curve values */
-    public double getMultiplier(FormulaType type) { return config.getDouble("Experience_Formula." + StringUtils.getCapitalized(type.toString()) + "_Values.multiplier"); }
-    public int getBase(FormulaType type) { return config.getInt("Experience_Formula." + StringUtils.getCapitalized(type.toString()) + "_Values.base"); }
-    public double getExponent(FormulaType type) { return config.getDouble("Experience_Formula." + StringUtils.getCapitalized(type.toString()) +"_Values.exponent"); }
+    public double getMultiplier(FormulaType type) {
+        double def = type == FormulaType.LINEAR ? 20D : 0.1D;
+        return config.getDouble(
+                "Experience_Formula." + StringUtils.getCapitalized(type.toString())
+                        + "_Values.multiplier", def);
+    }
+
+    public int getBase(FormulaType type) {
+        int def = type == FormulaType.LINEAR ? 1020 : 2000;
+        return config.getInt("Experience_Formula." + StringUtils.getCapitalized(type.toString())
+                + "_Values.base", def);
+    }
+
+    public double getExponent(FormulaType type) {
+        return config.getDouble(
+                "Experience_Formula." + StringUtils.getCapitalized(type.toString())
+                        + "_Values.exponent");
+    }
 
     /* Global modifier */
-    public double getExperienceGainsGlobalMultiplier() { return config.getDouble("Experience_Formula.Multiplier.Global", 1.0); }
-    public void setExperienceGainsGlobalMultiplier(double value) { config.set("Experience_Formula.Multiplier.Global", value); }
+    public double getExperienceGainsGlobalMultiplier() {
+        if (experienceGainsGlobalMultiplier == null) {
+            experienceGainsGlobalMultiplier = config.getDouble(
+                    "Experience_Formula.Multiplier.Global", 1.0);
+        }
+
+        return experienceGainsGlobalMultiplier;
+    }
+
+    public void setExperienceGainsGlobalMultiplier(double value) {
+        config.set("Experience_Formula.Multiplier.Global", value);
+        experienceGainsGlobalMultiplier = value;
+        globalXpRateSetMillis = System.currentTimeMillis();
+    }
+
+    /**
+     * When the global multiplier was last changed at runtime (epoch millis), or 0 if it still
+     * holds the value loaded from experience.yml.
+     */
+    public long getExperienceGainsGlobalMultiplierSetMillis() {
+        return globalXpRateSetMillis;
+    }
+
+    /**
+     * The effective XP rate multiplier for a skill. Per-skill /xprate rates do not stack with
+     * the global multiplier; whichever is higher wins.
+     */
+    public double getExperienceGainsMultiplier(PrimarySkillType skill) {
+        final double global = getExperienceGainsGlobalMultiplier();
+        final double[] overrides = skillXpRateOverrides;
+
+        if (overrides != null) {
+            final double override = overrides[skill.ordinal()];
+            if (!Double.isNaN(override)) {
+                return Math.max(override, global);
+            }
+        }
+
+        return global;
+    }
+
+    /**
+     * Overrides the XP rate multiplier for a single skill until cleared by
+     * {@link #clearExperienceGainsSkillMultipliers()} or a config reload. Runtime state only,
+     * nothing is written to experience.yml.
+     */
+    public void setExperienceGainsSkillMultiplier(PrimarySkillType skill, double value) {
+        final double[] current = skillXpRateOverrides;
+        final double[] updated;
+
+        if (current == null) {
+            updated = new double[PrimarySkillType.values().length];
+            Arrays.fill(updated, Double.NaN);
+        } else {
+            updated = current.clone();
+        }
+
+        updated[skill.ordinal()] = value;
+
+        final long[] currentTimes = skillXpRateSetMillis;
+        final long[] updatedTimes = currentTimes != null ? currentTimes.clone()
+                : new long[PrimarySkillType.values().length];
+        updatedTimes[skill.ordinal()] = System.currentTimeMillis();
+
+        skillXpRateOverrides = updated;
+        skillXpRateSetMillis = updatedTimes;
+    }
+
+    public void clearExperienceGainsSkillMultiplier(PrimarySkillType skill) {
+        final double[] current = skillXpRateOverrides;
+        if (current == null || Double.isNaN(current[skill.ordinal()])) {
+            return;
+        }
+
+        final double[] updated = current.clone();
+        updated[skill.ordinal()] = Double.NaN;
+
+        final long[] currentTimes = skillXpRateSetMillis;
+        final long[] updatedTimes = currentTimes != null ? currentTimes.clone()
+                : new long[PrimarySkillType.values().length];
+        updatedTimes[skill.ordinal()] = 0;
+
+        skillXpRateOverrides = updated;
+        skillXpRateSetMillis = updatedTimes;
+    }
+
+    public void clearExperienceGainsSkillMultipliers() {
+        skillXpRateOverrides = null;
+        skillXpRateSetMillis = null;
+    }
+
+    /**
+     * When a skill's /xprate rate was set (epoch millis), or 0 if the skill has no active rate.
+     */
+    public long getExperienceGainsSkillMultiplierSetMillis(PrimarySkillType skill) {
+        final long[] setTimes = skillXpRateSetMillis;
+        return setTimes != null ? setTimes[skill.ordinal()] : 0;
+    }
+
+    /**
+     * Snapshot of the per-skill XP rate overrides currently in effect, for display.
+     */
+    public Map<PrimarySkillType, Double> getExperienceGainsSkillMultiplierOverrides() {
+        final Map<PrimarySkillType, Double> snapshot = new EnumMap<>(PrimarySkillType.class);
+        final double[] overrides = skillXpRateOverrides;
+
+        if (overrides != null) {
+            for (PrimarySkillType skill : PrimarySkillType.values()) {
+                final double override = overrides[skill.ordinal()];
+                if (!Double.isNaN(override)) {
+                    snapshot.put(skill, override);
+                }
+            }
+        }
+
+        return snapshot;
+    }
 
     /* PVP modifier */
-    public double getPlayerVersusPlayerXP() { return config.getDouble("Experience_Formula.Multiplier.PVP", 1.0); }
+    public double getPlayerVersusPlayerXP() {
+        return config.getDouble("Experience_Formula.Multiplier.PVP", 1.0);
+    }
 
     /* Spawned Mob modifier */
-    public double getSpawnedMobXpMultiplier() { return config.getDouble("Experience_Formula.Mobspawners.Multiplier", 0.0); }
+    public double getSpawnedMobXpMultiplier() {
+        return config.getDouble("Experience_Formula.Mobspawners.Multiplier", 0.0);
+    }
+
+    public double getEggXpMultiplier() {
+        return config.getDouble("Experience_Formula.Eggs.Multiplier", 0.0);
+    }
+
+    public double getTamedMobXpMultiplier() {
+        return config.getDouble("Experience_Formula.Player_Tamed.Multiplier", 0.0);
+    }
+
+    public double getNetherPortalXpMultiplier() {
+        return config.getDouble("Experience_Formula.Nether_Portal.Multiplier", 0.0);
+    }
+
+    public double getBredMobXpMultiplier() {
+        return config.getDouble("Experience_Formula.Breeding.Multiplier", 1.0);
+    }
 
     /* Skill modifiers */
-    public double getFormulaSkillModifier(SkillType skill) { return config.getDouble("Experience_Formula.Modifier." + StringUtils.getCapitalized(skill.toString())); }
+    public double getFormulaSkillModifier(PrimarySkillType skill) {
+        return formulaSkillModifiers.computeIfAbsent(skill, key -> config.getDouble(
+                "Experience_Formula.Skill_Multiplier." + StringUtils.getCapitalized(
+                        key.toString()),
+                1D));
+    }
 
     /* Custom XP perk */
-    public double getCustomXpPerkBoost() { return config.getDouble("Experience_Formula.Custom_XP_Perk.Boost", 1.25); }
+    public double getCustomXpPerkBoost() {
+        if (customXpPerkBoost == null) {
+            customXpPerkBoost = config.getDouble("Experience_Formula.Custom_XP_Perk.Boost", 1.25);
+        }
+
+        return customXpPerkBoost;
+    }
+
+    /* Diminished Returns */
+    public float getDiminishedReturnsCap() {
+        if (diminishedReturnsCap == null) {
+            diminishedReturnsCap = (float) config.getDouble(
+                    "Diminished_Returns.Guaranteed_Minimum_Percentage", 0.05D);
+        }
+
+        return diminishedReturnsCap;
+    }
+
+    public boolean getDiminishedReturnsEnabled() {
+        if (diminishedReturnsEnabled == null) {
+            diminishedReturnsEnabled = config.getBoolean("Diminished_Returns.Enabled", false);
+        }
+
+        return diminishedReturnsEnabled;
+    }
+
+    public int getDiminishedReturnsThreshold(PrimarySkillType skill) {
+        return diminishedReturnsThresholds.computeIfAbsent(skill, key -> config.getInt(
+                "Diminished_Returns.Threshold." + StringUtils.getCapitalized(key.toString()),
+                20000));
+    }
+
+    public int getDiminishedReturnsTimeInterval() {
+        if (diminishedReturnsTimeInterval == null) {
+            diminishedReturnsTimeInterval = config.getInt("Diminished_Returns.Time_Interval", 10);
+        }
+
+        return diminishedReturnsTimeInterval;
+    }
 
     /* Conversion */
-    public double getExpModifier() { return config.getDouble("Conversion.Exp_Modifier", 1); }
+    public double getExpModifier() {
+        return config.getDouble("Conversion.Exp_Modifier", 1);
+    }
 
     /*
      * XP SETTINGS
      */
 
     /* General Settings */
-    public boolean getExperienceGainsPlayerVersusPlayerEnabled() { return config.getBoolean("Experience.PVP.Rewards", true); }
+    public boolean getExperienceGainsPlayerVersusPlayerEnabled() {
+        return config.getBoolean("Experience_Values.PVP.Rewards", true);
+    }
 
     /* Combat XP Multipliers */
-    public double getCombatXP(EntityType entity) { return config.getDouble("Experience.Combat.Multiplier." + StringUtils.getPrettyEntityTypeString(entity).replace(" ", "_")); }
-    public double getAnimalsXP() { return config.getDouble("Experience.Combat.Multiplier.Animals", 1.0); }
-    public double getWitherSkeletonXP() { return config.getDouble("Experience.Combat.Multiplier.Wither_Skeleton", 4.0); }
+    public double getCombatXP(String entity) {
+        return config.getDouble("Experience_Values.Combat.Multiplier." + entity);
+    }
+
+    public double getCombatXP(EntityType entity) {
+        return config.getDouble(
+                "Experience_Values.Combat.Multiplier." + getConfigEntityTypeString(entity).replace(
+                        " ", "_"));
+    }
+
+    public double getAnimalsXP(EntityType entity) {
+        return config.getDouble(
+                "Experience_Values.Combat.Multiplier." + getConfigEntityTypeString(entity).replace(
+                        " ", "_"),
+                getAnimalsXP());
+    }
+
+    public double getAnimalsXP() {
+        return config.getDouble("Experience_Values.Combat.Multiplier.Animals", 1.0);
+    }
+
+    public boolean hasCombatXP(EntityType entity) {
+        return config.contains(
+                "Experience_Values.Combat.Multiplier." + getConfigEntityTypeString(entity).replace(
+                        " ", "_"));
+    }
 
     /* Materials  */
-    public int getXp(SkillType skill, Material material) { return config.getInt("Experience." + StringUtils.getCapitalized(skill.toString()) + "." + StringUtils.getPrettyItemString(material).replace(" ", "_")); }
+    private int getConfigXp(PrimarySkillType skill, Material material) {
+        // prevents exploit
+        if (material == Material.LILY_PAD) {
+            return 0;
+        }
+
+        final String baseString =
+                "Experience_Values." + StringUtils.getCapitalized(skill.toString()) + ".";
+        final String configPath = baseString + getMaterialConfigString(material);
+        return config.getInt(configPath, 0);
+    }
+
+    public int getXp(PrimarySkillType skill, Material material) {
+        return blockExperienceMap.get(skill).getOrDefault(material, 0);
+    }
+
+    public int getXp(PrimarySkillType skill, BlockState blockState) {
+        return getXp(skill, blockState.getType());
+    }
+
+    public int getXp(PrimarySkillType skill, Block block) {
+        Material material = block.getType();
+        return getXp(skill, material);
+    }
+
+    public int getXp(PrimarySkillType skill, BlockData data) {
+        return getXp(skill, data.getMaterial());
+    }
+
+    public boolean doesBlockGiveSkillXP(PrimarySkillType skill, Material material) {
+        return getXp(skill, material) > 0;
+    }
+
+    @Deprecated(forRemoval = true, since = "2.2.024")
+    public boolean doesBlockGiveSkillXP(PrimarySkillType skill, BlockData data) {
+        return getXp(skill, data) > 0;
+    }
+
+    /*
+     * Experience Bar Stuff
+     */
+
+    public boolean isPartyExperienceBarsEnabled() {
+        return config.getBoolean("Experience_Bars.Update.Party", true);
+    }
+
+    public boolean isPassiveGainsExperienceBarsEnabled() {
+        return config.getBoolean("Experience_Bars.Update.Passive", true);
+    }
+
+    public boolean getDoExperienceBarsAlwaysUpdateTitle() {
+        return config.getBoolean(
+                "Experience_Bars.ThisMayCauseLag.AlwaysUpdateTitlesWhenXPIsGained.Enable",
+                false) || getAddExtraDetails();
+    }
+
+    public boolean getAddExtraDetails() {
+        return config.getBoolean(
+                "Experience_Bars.ThisMayCauseLag.AlwaysUpdateTitlesWhenXPIsGained.ExtraDetails",
+                false);
+    }
+
+    public boolean useCombatHPCeiling() {
+        return config.getBoolean("ExploitFix.Combat.XPCeiling.Enabled", true);
+    }
+
+    public int getCombatHPCeiling() {
+        return config.getInt("ExploitFix.Combat.XPCeiling.Damage_Limit", 100);
+    }
+
+    public boolean isExperienceBarsEnabled() {
+        if (experienceBarsEnabled == null) {
+            experienceBarsEnabled = config.getBoolean("Experience_Bars.Enable", true);
+        }
+
+        return experienceBarsEnabled;
+    }
+
+    public boolean isExperienceBarEnabled(PrimarySkillType primarySkillType) {
+        return experienceBarEnabled.computeIfAbsent(primarySkillType, key -> config.getBoolean(
+                "Experience_Bars." + StringUtils.getCapitalized(key.toString()) + ".Enable",
+                true));
+    }
+
+    public BarColor getExperienceBarColor(PrimarySkillType primarySkillType) {
+        return experienceBarColors.computeIfAbsent(primarySkillType,
+                this::resolveExperienceBarColor);
+    }
+
+    private BarColor resolveExperienceBarColor(PrimarySkillType primarySkillType) {
+        String colorValueFromConfig = config.getString(
+                "Experience_Bars." + StringUtils.getCapitalized(primarySkillType.toString())
+                        + ".Color");
+
+        for (BarColor barColor : BarColor.values()) {
+            if (barColor.toString().equalsIgnoreCase(colorValueFromConfig)) {
+                return barColor;
+            }
+        }
+
+        //In case the value is invalid
+        return BarColor.WHITE;
+    }
+
+    public BarStyle getExperienceBarStyle(PrimarySkillType primarySkillType) {
+        return experienceBarStyles.computeIfAbsent(primarySkillType,
+                this::resolveExperienceBarStyle);
+    }
+
+    private BarStyle resolveExperienceBarStyle(PrimarySkillType primarySkillType) {
+        String colorValueFromConfig = config.getString(
+                "Experience_Bars." + StringUtils.getCapitalized(primarySkillType.toString())
+                        + ".BarStyle");
+
+        for (BarStyle barStyle : BarStyle.values()) {
+            if (barStyle.toString().equalsIgnoreCase(colorValueFromConfig)) {
+                return barStyle;
+            }
+        }
+
+        //In case the value is invalid
+        return BarStyle.SOLID;
+    }
 
     /* Acrobatics */
-    public int getDodgeXPModifier() { return config.getInt("Experience.Acrobatics.Dodge", 120); }
-    public int getRollXPModifier() { return config.getInt("Experience.Acrobatics.Roll", 80); }
-    public int getFallXPModifier() { return config.getInt("Experience.Acrobatics.Fall", 120); }
+    public int getDodgeXPModifier() {
+        return config.getInt("Experience_Values.Acrobatics.Dodge", 120);
+    }
 
-    public double getFeatherFallXPModifier() { return config.getDouble("Experience.Acrobatics.FeatherFall_Multiplier", 2.0); }
+    public int getRollXPModifier() {
+        return config.getInt("Experience_Values.Acrobatics.Roll", 80);
+    }
+
+    public int getFallXPModifier() {
+        return config.getInt("Experience_Values.Acrobatics.Fall", 120);
+    }
+
+    public double getFeatherFallXPModifier() {
+        return config.getDouble("Experience_Values.Acrobatics.FeatherFall_Multiplier", 2.0);
+    }
 
     /* Alchemy */
-    public double getPotionXP() { return config.getDouble("Experience.Alchemy.Potion", 150D); }
+    public double getPotionXP(PotionStage stage) {
+        return config.getDouble(
+                "Experience_Values.Alchemy.Potion_Brewing.Stage_" + stage.toNumerical(), 10D);
+    }
 
-    /* Fishing */
-    public int getFishingBaseXP() { return config.getInt("Experience.Fishing.Base", 800); }
-    public int getFishingShakeXP() { return config.getInt("Experience.Fishing.Shake", 50); }
+    /* Archery */
+    public double getArcheryDistanceMultiplier() {
+        return config.getDouble("Experience_Values.Archery.Distance_Multiplier", 0.025);
+    }
+
+    public int getFishingShakeXP() {
+        return config.getInt("Experience_Values.Fishing.Shake", 50);
+    }
 
     /* Repair */
-    public double getRepairXPBase() { return config.getDouble("Experience.Repair.Base", 1000.0); }
-    public double getRepairXP(RepairMaterialType repairMaterialType) { return config.getDouble("Experience.Repair." + StringUtils.getCapitalized(repairMaterialType.toString())); }
+    public double getRepairXPBase() {
+        return config.getDouble("Experience_Values.Repair.Base", 1000.0);
+    }
+
+    public double getRepairXP(MaterialType repairMaterialType) {
+        return config.getDouble(
+                "Experience_Values.Repair." + StringUtils.getCapitalized(
+                        repairMaterialType.toString()));
+    }
 
     /* Taming */
-    public int getTamingXPHorse() { return config.getInt("Experience.Taming.Animal_Taming.Horse", 1000); }
-    public int getTamingXPWolf() { return config.getInt("Experience.Taming.Animal_Taming.Wolf", 250); }
-    public int getTamingXPOcelot() { return config.getInt("Experience.Taming.Animal_Taming.Ocelot", 500); }
+    public int getTamingXP(EntityType type) {
+        return config.getInt(
+                "Experience_Values.Taming.Animal_Taming." + getConfigEntityTypeString(type));
+    }
 
-    /* Woodcutting */
-    public int getWoodcuttingXPOak() { return config.getInt("Experience.Woodcutting.Oak", 70); }
-    public int getWoodcuttingXPBirch() { return config.getInt("Experience.Woodcutting.Birch", 90); }
-    public int getWoodcuttingXPSpruce() { return config.getInt("Experience.Woodcutting.Spruce", 80); }
-    public int getWoodcuttingXPJungle() { return config.getInt("Experience.Woodcutting.Jungle", 100); }
-    public int getWoodcuttingXPHugeBrownMushroom() { return config.getInt("Experience.Woodcutting.Huge_Mushroom_Brown", 70); }
-    public int getWoodcuttingXPHugeRedMushroom() { return config.getInt("Experience.Woodcutting.Huge_Mushroom_Red", 70); }
+    public boolean preventStoneLavaFarming() {
+        if (stoneLavaFarmingPrevented == null) {
+            stoneLavaFarmingPrevented = config.getBoolean(
+                    "ExploitFix.LavaStoneAndCobbleFarming", true);
+        }
+
+        return stoneLavaFarmingPrevented;
+    }
+
+    public boolean limitXPOnTallPlants() {
+        if (tallPlantXPLimited == null) {
+            tallPlantXPLimited = config.getBoolean("ExploitFix.LimitTallPlantFarming", true);
+        }
+
+        return tallPlantXPLimited;
+    }
 }

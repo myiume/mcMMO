@@ -1,61 +1,40 @@
 package com.gmail.nossr50.skills.excavation;
 
+import static com.gmail.nossr50.util.text.ConfigStringUtils.getMaterialConfigString;
+
+import com.gmail.nossr50.config.treasure.TreasureConfig;
+import com.gmail.nossr50.datatypes.treasure.ExcavationTreasure;
 import java.util.ArrayList;
 import java.util.List;
-
-import com.gmail.nossr50.mcMMO;
-import org.bukkit.block.BlockState;
-
-import com.gmail.nossr50.config.experience.ExperienceConfig;
-import com.gmail.nossr50.config.treasure.TreasureConfig;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.datatypes.treasure.ExcavationTreasure;
+import org.bukkit.Material;
+import org.bukkit.block.Block;
 
 public class Excavation {
     /**
-     * Get the list of possible {@link ExcavationTreasure|ExcavationTreasures} obtained from a given block.
+     * Get the list of possible {@link ExcavationTreasure|ExcavationTreasures} obtained from a given
+     * block.
      *
-     * @param blockState The {@link BlockState} of the block to check.
+     * @param block The {@link Block} to check for treasures
      * @return the list of treasures that could be found
      */
-    protected static List<ExcavationTreasure> getTreasures(BlockState blockState) {
-        switch (blockState.getType()) {
-            case DIRT:
-                return TreasureConfig.getInstance().excavationFromDirt;
-
-            case GRASS:
-                return TreasureConfig.getInstance().excavationFromGrass;
-
-            case SAND:
-                return TreasureConfig.getInstance().excavationFromSand;
-
-            case GRAVEL:
-                return TreasureConfig.getInstance().excavationFromGravel;
-
-            case CLAY:
-                return TreasureConfig.getInstance().excavationFromClay;
-
-            case MYCEL:
-                return TreasureConfig.getInstance().excavationFromMycel;
-
-            case SOUL_SAND:
-                return TreasureConfig.getInstance().excavationFromSoulSand;
-
-            case SNOW:
-                return TreasureConfig.getInstance().excavationFromSnow;
-
-            default:
-                return new ArrayList<ExcavationTreasure>();
-        }
+    protected static List<ExcavationTreasure> getTreasures(Block block) {
+        return getTreasures(block.getType());
     }
 
-    protected static int getBlockXP(BlockState blockState) {
-        int xp = ExperienceConfig.getInstance().getXp(SkillType.EXCAVATION, blockState.getType());
-
-        if (xp == 0 && mcMMO.getModManager().isCustomExcavationBlock(blockState)) {
-            xp = mcMMO.getModManager().getBlock(blockState).getXpGain();
+    /**
+     * Get the list of possible {@link ExcavationTreasure|ExcavationTreasures} for a given material.
+     *
+     * <p>Prefer this overload when the block has already been broken and its type is AIR —
+     * e.g. when called from {@link org.bukkit.event.block.BlockDropItemEvent}.
+     *
+     * @param material the material of the block before it was broken
+     * @return the list of treasures that could be found
+     */
+    protected static List<ExcavationTreasure> getTreasures(Material material) {
+        String friendly = getMaterialConfigString(material);
+        if (TreasureConfig.getInstance().excavationMap.containsKey(friendly)) {
+            return TreasureConfig.getInstance().excavationMap.get(friendly);
         }
-
-        return xp;
+        return new ArrayList<>();
     }
 }

@@ -1,12 +1,12 @@
 package com.gmail.nossr50.datatypes.party;
 
-import org.bukkit.entity.Player;
+import static com.gmail.nossr50.util.text.ConfigStringUtils.getConfigPartyFeatureString;
 
 import com.gmail.nossr50.commands.party.PartySubcommandType;
-import com.gmail.nossr50.config.Config;
 import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.util.Permissions;
-import com.gmail.nossr50.util.StringUtils;
+import org.bukkit.entity.Player;
 
 public enum PartyFeature {
     CHAT,
@@ -16,11 +16,13 @@ public enum PartyFeature {
     XP_SHARE;
 
     public String getLocaleString() {
-        return LocaleLoader.getString("Party.Feature." + StringUtils.getPrettyPartyFeatureString(this).replace(" ", ""));
+        return LocaleLoader.getString("Party.Feature." + getConfigPartyFeatureString(this));
     }
 
     public String getFeatureLockedLocaleString() {
-        return LocaleLoader.getString("Ability.Generic.Template.Lock", LocaleLoader.getString("Party.Feature.Locked." + StringUtils.getPrettyPartyFeatureString(this).replace(" ", ""), Config.getInstance().getPartyFeatureUnlockLevel(this)));
+        return LocaleLoader.getString("Ability.Generic.Template.Lock",
+                LocaleLoader.getString("Party.Feature.Locked." + getConfigPartyFeatureString(this),
+                        mcMMO.p.getGeneralConfig().getPartyFeatureUnlockLevel(this)));
     }
 
     public boolean hasPermission(Player player) {
@@ -44,7 +46,6 @@ public enum PartyFeature {
             default:
                 return false;
         }
-
 
         return Permissions.partySubcommand(player, partySubCommandType);
     }

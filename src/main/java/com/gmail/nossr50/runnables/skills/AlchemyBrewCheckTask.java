@@ -1,43 +1,61 @@
 package com.gmail.nossr50.runnables.skills;
 
-import java.util.Arrays;
+import static com.gmail.nossr50.skills.alchemy.AlchemyPotionBrewer.isValidBrew;
 
-import org.bukkit.block.Block;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.skills.alchemy.Alchemy;
+import com.gmail.nossr50.util.CancellableRunnable;
+import com.gmail.nossr50.util.ContainerMetadataUtils;
+import com.gmail.nossr50.util.player.UserManager;
+import java.util.Arrays;
+import org.bukkit.Location;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.block.BrewingStand;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.scheduler.BukkitRunnable;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import com.gmail.nossr50.skills.alchemy.Alchemy;
-import com.gmail.nossr50.skills.alchemy.AlchemyPotionBrewer;
+public class AlchemyBrewCheckTask extends CancellableRunnable {
+    private final BrewingStand brewingStand;
+    private final ItemStack[] oldInventory;
 
-public class AlchemyBrewCheckTask extends BukkitRunnable {
-    private final static int INGREDIENT_SLOT = 3;
+    @Deprecated(forRemoval = true, since = "2.2.010")
+    public AlchemyBrewCheckTask(@Nullable Player ignored, BrewingStand brewingStand) {
+        this(brewingStand);
+    }
 
-    private Player player;
-    private BrewingStand brewingStand;
-    private ItemStack[] oldInventory;
-
-    public AlchemyBrewCheckTask(Player player, BrewingStand brewingStand) {
-        this.player = player;
+    public AlchemyBrewCheckTask(@NotNull BrewingStand brewingStand) {
         this.brewingStand = brewingStand;
         this.oldInventory = Arrays.copyOfRange(brewingStand.getInventory().getContents(), 0, 4);
     }
 
     @Override
     public void run() {
-        Block block = brewingStand.getBlock();
-        ItemStack[] newInventory = Arrays.copyOfRange(((BrewingStand) block.getState()).getInventory().getContents(), 0, 4);
-
-        if (Alchemy.brewingStandMap.containsKey(brewingStand)) {
-            if (oldInventory[INGREDIENT_SLOT] == null || newInventory[INGREDIENT_SLOT] == null || !oldInventory[INGREDIENT_SLOT].isSimilar(newInventory[INGREDIENT_SLOT]) || !AlchemyPotionBrewer.isValidBrew(player, newInventory)) {
-                Alchemy.brewingStandMap.get(brewingStand).cancelBrew();
+        OfflinePlayer offlinePlayer = ContainerMetadataUtils.getContainerOwner(brewingStand);
+        int ingredientLevel = 1;
+        if (offlinePlayer != null && offlinePlayer.isOnline()) {
+            final McMMOPlayer mmoPlayer = UserManager.getPlayer(offlinePlayer.getPlayer());
+            if (mmoPlayer != null) {
+                ingredientLevel = mmoPlayer.getAlchemyManager().getTier();
             }
         }
+        final Location location = brewingStand.getLocation();
+        final ItemStack[] newInventory = Arrays.copyOfRange(
+                brewingStand.getInventory().getContents(), 0, 4);
+        boolean validBrew =
+                brewingStand.getFuelLevel() > 0 && isValidBrew(ingredientLevel, newInventory);
 
-        if (!Alchemy.brewingStandMap.containsKey(brewingStand) && AlchemyPotionBrewer.isValidBrew(player, newInventory)) {
-            Alchemy.brewingStandMap.put(brewingStand, new AlchemyBrewTask(brewingStand, player));
+        if (Alchemy.brewingStandMap.containsKey(location)) {
+            if (oldInventory[Alchemy.INGREDIENT_SLOT] == null
+                    || newInventory[Alchemy.INGREDIENT_SLOT] == null
+                    || !oldInventory[Alchemy.INGREDIENT_SLOT].isSimilar(
+                    newInventory[Alchemy.INGREDIENT_SLOT])
+                    || !validBrew) {
+                Alchemy.brewingStandMap.get(location).cancelBrew();
+            }
+        } else if (validBrew) {
+            Alchemy.brewingStandMap.put(location, new AlchemyBrewTask(brewingStand));
         }
     }
-
 }

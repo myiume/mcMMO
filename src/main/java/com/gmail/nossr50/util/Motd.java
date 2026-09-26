@@ -1,23 +1,33 @@
 package com.gmail.nossr50.util;
 
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.skills.PerksUtils;
 import java.text.DecimalFormat;
-
+import java.text.DecimalFormatSymbols;
+import java.util.Locale;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginDescriptionFile;
 
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.Config;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.skills.PerksUtils;
-
 public final class Motd {
+    /**
+     * @deprecated Captures the locale string at class initialization, so it goes stale after a
+     * locale reload. Scheduled for removal; resolve 'MOTD.PerksPrefix' per call instead.
+     */
+    @Deprecated(forRemoval = true, since = "2.3.000")
     public static final String PERK_PREFIX = LocaleLoader.getString("MOTD.PerksPrefix") + " ";
-    private static final PluginDescriptionFile pluginDescription = mcMMO.p.getDescription();
 
-    private Motd() {}
+    private Motd() {
+    }
+
+    // Resolved per call so locale reloads take effect immediately
+    private static String perkPrefix() {
+        return LocaleLoader.getString("MOTD.PerksPrefix") + " ";
+    }
 
     public static void displayAll(Player player) {
+        final PluginDescriptionFile pluginDescription = mcMMO.p.getDescription();
         displayVersion(player, pluginDescription.getVersion());
         displayHardcoreSettings(player);
         displayXpPerks(player);
@@ -30,11 +40,13 @@ public final class Motd {
     /**
      * Display version info.
      *
-     * @param player  Target player
+     * @param player Target player
      * @param version Plugin version
      */
     public static void displayVersion(Player player, String version) {
-        player.sendMessage(LocaleLoader.getString("MOTD.Version", version));
+        if (Permissions.showversion(player)) {
+            player.sendMessage(LocaleLoader.getString("MOTD.Version.Overhaul", version));
+        }
     }
 
     /**
@@ -66,14 +78,17 @@ public final class Motd {
             seperator = " & ";
         }
 
-        player.sendMessage(LocaleLoader.getString("MOTD.Hardcore.Enabled", statLossInfo + seperator + vampirismInfo));
+        player.sendMessage(LocaleLoader.getString("MOTD.Hardcore.Enabled",
+                statLossInfo + seperator + vampirismInfo));
 
         if (deathStatLossEnabled) {
-            player.sendMessage(LocaleLoader.getString("MOTD.Hardcore.DeathStatLoss.Stats", Config.getInstance().getHardcoreDeathStatPenaltyPercentage()));
+            player.sendMessage(LocaleLoader.getString("MOTD.Hardcore.DeathStatLoss.Stats",
+                    mcMMO.p.getGeneralConfig().getHardcoreDeathStatPenaltyPercentage()));
         }
 
         if (vampirismEnabled) {
-            player.sendMessage(LocaleLoader.getString("MOTD.Hardcore.Vampirism.Stats", Config.getInstance().getHardcoreVampirismStatLeechPercentage()));
+            player.sendMessage(LocaleLoader.getString("MOTD.Hardcore.Vampirism.Stats",
+                    mcMMO.p.getGeneralConfig().getHardcoreVampirismStatLeechPercentage()));
         }
     }
 
@@ -83,9 +98,12 @@ public final class Motd {
      * @param player Target player
      */
     public static void displayXpPerks(Player player) {
-        for (SkillType skill : SkillType.values()) {
+        for (PrimarySkillType skill : PrimarySkillType.values()) {
+            //TODO: Wow this is horrifying...
             if (PerksUtils.handleXpPerks(player, 1, skill) > 1) {
-                player.sendMessage(PERK_PREFIX + LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Perks.XP.Name"), LocaleLoader.getString("Perks.XP.Desc")));
+                player.sendMessage(perkPrefix() + LocaleLoader.getString("Effects.Template",
+                        LocaleLoader.getString("Perks.XP.Name"),
+                        LocaleLoader.getString("Perks.XP.Desc")));
                 return;
             }
         }
@@ -100,8 +118,12 @@ public final class Motd {
         double cooldownReduction = 1 - (PerksUtils.handleCooldownPerks(player, 12) / 12.0);
 
         if (cooldownReduction > 0.0) {
-            DecimalFormat percent = new DecimalFormat("##0.00%");
-            player.sendMessage(PERK_PREFIX + LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Perks.Cooldowns.Name"), LocaleLoader.getString("Perks.Cooldowns.Desc", percent.format(cooldownReduction))));
+            DecimalFormat percent = new DecimalFormat("##0.00%",
+                    DecimalFormatSymbols.getInstance(Locale.US));
+            player.sendMessage(perkPrefix() + LocaleLoader.getString("Effects.Template",
+                    LocaleLoader.getString("Perks.Cooldowns.Name"),
+                    LocaleLoader.getString("Perks.Cooldowns.Desc",
+                            percent.format(cooldownReduction))));
         }
     }
 
@@ -114,7 +136,9 @@ public final class Motd {
         int perkAmount = PerksUtils.handleActivationPerks(player, 0, 0);
 
         if (perkAmount > 0) {
-            player.sendMessage(PERK_PREFIX + LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Perks.ActivationTime.Name"), LocaleLoader.getString("Perks.ActivationTime.Desc", perkAmount)));
+            player.sendMessage(perkPrefix() + LocaleLoader.getString("Effects.Template",
+                    LocaleLoader.getString("Perks.ActivationTime.Name"),
+                    LocaleLoader.getString("Perks.ActivationTime.Desc", perkAmount)));
         }
     }
 
@@ -124,9 +148,11 @@ public final class Motd {
      * @param player Target player
      */
     public static void displayLuckyPerks(Player player) {
-        for (SkillType skill : SkillType.values()) {
+        for (PrimarySkillType skill : PrimarySkillType.values()) {
             if (Permissions.lucky(player, skill)) {
-                player.sendMessage(PERK_PREFIX + LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Perks.Lucky.Name"), LocaleLoader.getString("Perks.Lucky.Desc.Login")));
+                player.sendMessage(perkPrefix() + LocaleLoader.getString("Effects.Template",
+                        LocaleLoader.getString("Perks.Lucky.Name"),
+                        LocaleLoader.getString("Perks.Lucky.Desc.Login")));
                 return;
             }
         }
@@ -135,7 +161,7 @@ public final class Motd {
     /**
      * Display website info.
      *
-     * @param player  Target player
+     * @param player Target player
      * @param website Plugin website
      */
     public static void displayWebsite(Player player, String website) {

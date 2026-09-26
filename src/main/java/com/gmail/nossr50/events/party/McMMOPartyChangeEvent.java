@@ -4,17 +4,19 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.Cancellable;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.player.PlayerEvent;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Called when a player attempts to join, leave, or change parties.
  */
 public class McMMOPartyChangeEvent extends PlayerEvent implements Cancellable {
-    private String oldParty;
-    private String newParty;
-    private EventReason reason;
+    private final String oldParty;
+    private final String newParty;
+    private final EventReason reason;
     private boolean cancelled;
 
-    public McMMOPartyChangeEvent(Player player, String oldParty, String newParty, EventReason reason) {
+    public McMMOPartyChangeEvent(Player player, String oldParty, String newParty,
+            EventReason reason) {
         super(player);
 
         if (newParty != null) {
@@ -53,6 +55,16 @@ public class McMMOPartyChangeEvent extends PlayerEvent implements Cancellable {
      */
     public enum EventReason {
         /**
+         * Created a party.
+         */
+        CREATED_PARTY,
+
+        /**
+         * Disbanded a party.
+         */
+        DISBANDED_PARTY,
+
+        /**
          * Joined a party for the first time.
          */
         JOINED_PARTY,
@@ -75,10 +87,12 @@ public class McMMOPartyChangeEvent extends PlayerEvent implements Cancellable {
         /**
          * Any reason that doesn't fit elsewhere.
          */
-        CUSTOM;
+        CUSTOM
     }
 
-    /** Following are required for Cancellable **/
+    /**
+     * Following are required for Cancellable
+     **/
     @Override
     public boolean isCancelled() {
         return cancelled;
@@ -89,11 +103,13 @@ public class McMMOPartyChangeEvent extends PlayerEvent implements Cancellable {
         this.cancelled = cancelled;
     }
 
-    /** Rest of file is required boilerplate for custom events **/
+    /**
+     * Rest of file is required boilerplate for custom events
+     **/
     private static final HandlerList handlers = new HandlerList();
 
     @Override
-    public HandlerList getHandlers() {
+    public @NotNull HandlerList getHandlers() {
         return handlers;
     }
 

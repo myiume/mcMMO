@@ -1,27 +1,41 @@
 package com.gmail.nossr50.datatypes.party;
 
-import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-
-import org.bukkit.ChatColor;
-import org.bukkit.Sound;
-import org.bukkit.entity.Player;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.Config;
+import com.gmail.nossr50.chat.SamePartyPredicate;
 import com.gmail.nossr50.config.experience.ExperienceConfig;
 import com.gmail.nossr50.datatypes.experience.FormulaType;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
 import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.party.PartyManager;
+import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.util.EventUtils;
 import com.gmail.nossr50.util.Misc;
+import com.gmail.nossr50.util.player.UserManager;
+import com.gmail.nossr50.util.sounds.SoundManager;
+import com.gmail.nossr50.util.sounds.SoundType;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
+import java.util.function.Predicate;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+import org.jetbrains.annotations.NotNull;
 
 public class Party {
-    private final LinkedHashSet<String> members = new LinkedHashSet<String>();
 
-    private String leader;
+    private static final DecimalFormat percent = new DecimalFormat("##0.00%",
+            DecimalFormatSymbols.getInstance(Locale.US));
+
+    private final @NotNull Predicate<CommandSender> samePartyPredicate;
+    private final LinkedHashMap<UUID, String> members = new LinkedHashMap<>();
+    private final List<Player> onlineMembers = new ArrayList<>();
+
+    private PartyLeader leader;
     private String name;
     private String password;
     private boolean locked;
@@ -29,65 +43,92 @@ public class Party {
     private int level;
     private float xp;
 
-    private ShareMode xpShareMode   = ShareMode.NONE;
+    private ShareMode xpShareMode = ShareMode.NONE;
     private ShareMode itemShareMode = ShareMode.NONE;
 
-    private boolean shareLootDrops        = true;
-    private boolean shareMiningDrops      = true;
-    private boolean shareHerbalismDrops   = true;
+    private boolean shareLootDrops = true;
+    private boolean shareMiningDrops = true;
+    private boolean shareHerbalismDrops = true;
     private boolean shareWoodcuttingDrops = true;
-    private boolean shareMiscDrops        = true;
+    private boolean shareMiscDrops = true;
 
     public Party(String name) {
         this.name = name;
+        samePartyPredicate = new SamePartyPredicate<>(this);
     }
 
-    public Party(String leader, String name) {
+    public Party(PartyLeader leader, String name) {
         this.leader = leader;
         this.name = name;
         this.locked = true;
         this.level = 0;
+        samePartyPredicate = new SamePartyPredicate<>(this);
     }
 
-    public Party(String leader, String name, String password) {
+    public Party(PartyLeader leader, String name, String password) {
         this.leader = leader;
         this.name = name;
         this.password = password;
         this.locked = true;
         this.level = 0;
+        samePartyPredicate = new SamePartyPredicate<>(this);
     }
 
-    public Party(String leader, String name, String password, boolean locked) {
+    public Party(PartyLeader leader, String name, String password, boolean locked) {
         this.leader = leader;
         this.name = name;
         this.password = password;
         this.locked = locked;
         this.level = 0;
+        samePartyPredicate = new SamePartyPredicate<>(this);
     }
 
-    public LinkedHashSet<String> getMembers() {
+    public LinkedHashMap<UUID, String> getMembers() {
         return members;
     }
 
     public List<Player> getOnlineMembers() {
-        List<Player> onlineMembers = new ArrayList<Player>();
+        return onlineMembers;
+    }
 
-        for (String memberName : members) {
-            Player member = mcMMO.p.getServer().getPlayerExact(memberName);
+    public List<Player> getVisibleMembers(Player player) {
+        ArrayList<Player> visibleMembers = new ArrayList<>();
 
-            if (member != null) {
-                onlineMembers.add(member);
+        for (Player p : getOnlineMembers()) {
+            if (player.canSee(p)) {
+                visibleMembers.add(p);
             }
         }
 
-        return onlineMembers;
+        return visibleMembers;
+    }
+
+    public List<String> getOnlinePlayerNames(CommandSender sender) {
+        Player player = sender instanceof Player ? (Player) sender : null;
+        List<String> onlinePlayerNames = new ArrayList<>();
+
+        for (Player onlinePlayer : getOnlineMembers()) {
+            if (player != null && player.canSee(onlinePlayer)) {
+                onlinePlayerNames.add(onlinePlayer.getName());
+            }
+        }
+
+        return onlinePlayerNames;
+    }
+
+    public boolean addOnlineMember(Player player) {
+        return getOnlineMembers().add(player);
+    }
+
+    public boolean removeOnlineMember(Player player) {
+        return getOnlineMembers().remove(player);
     }
 
     public String getName() {
         return name;
     }
 
-    public String getLeader() {
+    public PartyLeader getLeader() {
         return leader;
     }
 
@@ -104,7 +145,7 @@ public class Party {
     }
 
     public List<String> getItemShareCategories() {
-        List<String> shareCategories = new ArrayList<String>();
+        List<String> shareCategories = new ArrayList<>();
 
         for (ItemShareType shareType : ItemShareType.values()) {
             if (sharingDrops(shareType)) {
@@ -119,7 +160,7 @@ public class Party {
         this.name = name;
     }
 
-    public void setLeader(String leader) {
+    public void setLeader(PartyLeader leader) {
         this.leader = leader;
     }
 
@@ -166,12 +207,12 @@ public class Party {
 
     public int getXpToLevel() {
         FormulaType formulaType = ExperienceConfig.getInstance().getFormulaType();
-        return (mcMMO.getFormulaManager().getCachedXpToLevel(level, formulaType)) * (getOnlineMembers().size() + Config.getInstance().getPartyXpCurveMultiplier());
+        return (mcMMO.getFormulaManager().getXPtoNextLevel(level, formulaType)) * (
+                getOnlineMembers().size() + mcMMO.p.getGeneralConfig().getPartyXpCurveMultiplier());
     }
 
     public String getXpToLevelPercentage() {
-        DecimalFormat percent = new DecimalFormat("##0.00%");
-        return percent.format( this.getXp() / getXpToLevel());
+        return percent.format(this.getXp() / getXpToLevel());
     }
 
     /**
@@ -205,23 +246,27 @@ public class Party {
             return;
         }
 
-        if (!Config.getInstance().getPartyInformAllMembers()) {
-            Player leader = mcMMO.p.getServer().getPlayer(this.leader);
-            if (leader != null) {
-                leader.sendMessage(LocaleLoader.getString("Party.LevelUp", levelsGained, getLevel()));
+        if (!mcMMO.p.getGeneralConfig().getPartyInformAllMembers()) {
+            Player leader = mcMMO.p.getServer().getPlayer(this.leader.getUniqueId());
 
-                if (Config.getInstance().getLevelUpSoundsEnabled()) {
-                    leader.playSound(leader.getLocation(), Sound.LEVEL_UP, Misc.LEVELUP_VOLUME, Misc.LEVELUP_PITCH);
+            if (leader != null) {
+                leader.sendMessage(
+                        LocaleLoader.getString("Party.LevelUp", levelsGained, getLevel()));
+
+                final McMMOPlayer mmoLeader = UserManager.getPlayer(leader);
+                if (mcMMO.p.getGeneralConfig().getLevelUpSoundsEnabled()
+                        && (mmoLeader == null || mmoLeader.useLevelUpSounds())) {
+                    SoundManager.sendSound(leader, leader.getLocation(), SoundType.LEVEL_UP);
                 }
             }
-            return;
+        } else {
+            mcMMO.p.getPartyManager().informPartyMembersLevelUp(this, levelsGained, getLevel());
         }
 
-        PartyManager.informPartyMembersLevelUp(this, levelsGained, getLevel());
     }
 
     public boolean hasReachedLevelCap() {
-        return Config.getInstance().getPartyLevelCap() < getLevel() + 1;
+        return mcMMO.p.getGeneralConfig().getPartyLevelCap() < getLevel() + 1;
     }
 
     public void setXpShareMode(ShareMode xpShareMode) {
@@ -285,38 +330,81 @@ public class Party {
                 break;
 
             default:
-                return;
         }
     }
 
-    public String createMembersList(String playerName, List<Player> nearMembers) {
+    public boolean hasMember(String memberName) {
+        return this.getMembers().values().stream().anyMatch(memberName::equalsIgnoreCase);
+    }
+
+    public boolean hasMember(UUID uuid) {
+        return this.getMembers().containsKey(uuid);
+    }
+
+    /**
+     * Makes a formatted list of party members based on the perspective of a target player Players
+     * that are hidden will be shown as offline (formatted in the same way) Party leader will be
+     * formatted a specific way as well
+     *
+     * @param player target player to use as POV
+     * @return formatted list of party members from the POV of a player
+     */
+    public String createMembersList(Player player) {
         StringBuilder memberList = new StringBuilder();
+        List<String> coloredNames = new ArrayList<>();
 
-        for (String memberName : this.getMembers()) {
-            Player member = mcMMO.p.getServer().getPlayerExact(memberName);
+        for (UUID playerUUID : members.keySet()) {
+            OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerUUID);
 
-            if (this.getLeader().equalsIgnoreCase(memberName)) {
-                memberList.append(ChatColor.GOLD);
-
-                if (member == null) {
-                    memberName = memberName.substring(0, 1) + ChatColor.GRAY + ChatColor.ITALIC + "" + memberName.substring(1);
-                }
+            if (offlinePlayer.isOnline() && player.canSee((Player) offlinePlayer)) {
+                ChatColor onlineColor =
+                        leader.getUniqueId().equals(playerUUID) ? ChatColor.GOLD : ChatColor.GREEN;
+                coloredNames.add(onlineColor + offlinePlayer.getName());
+            } else {
+                coloredNames.add(ChatColor.DARK_GRAY + members.get(playerUUID));
             }
-            else if (member != null) {
-                memberList.append(ChatColor.WHITE);
-            }
-            else {
-                memberList.append(ChatColor.GRAY);
-            }
-
-            if (!nearMembers.contains(member) && !playerName.equalsIgnoreCase(memberName)) {
-                memberList.append(ChatColor.ITALIC).append("");
-            }
-
-            memberList.append(memberName).append(ChatColor.RESET).append(" ");
         }
 
+        buildChatMessage(memberList, coloredNames.toArray(new String[0]));
         return memberList.toString();
+    }
+
+    private void buildChatMessage(@NotNull StringBuilder stringBuilder, String @NotNull [] names) {
+        for (int i = 0; i < names.length; i++) {
+            if (i + 1 >= names.length) {
+                stringBuilder
+                        .append(names[i]);
+            } else {
+                stringBuilder
+                        .append(names[i])
+                        .append(" ");
+            }
+        }
+    }
+
+    /**
+     * Get the near party members.
+     *
+     * @param mmoPlayer The player to check
+     * @return the near party members
+     */
+    public List<Player> getNearMembers(McMMOPlayer mmoPlayer) {
+        List<Player> nearMembers = new ArrayList<>();
+        Party party = mmoPlayer.getParty();
+
+        if (party != null) {
+            Player player = mmoPlayer.getPlayer();
+            double range = mcMMO.p.getGeneralConfig().getPartyShareRange();
+
+            for (Player member : party.getOnlineMembers()) {
+                if (!player.equals(member) && member.isValid() && Misc.isNear(player.getLocation(),
+                        member.getLocation(), range)) {
+                    nearMembers.add(member);
+                }
+            }
+        }
+
+        return nearMembers;
     }
 
     @Override
@@ -325,11 +413,9 @@ public class Party {
             return false;
         }
 
-        if (!(obj instanceof Party)) {
+        if (!(obj instanceof Party other)) {
             return false;
         }
-
-        Party other = (Party) obj;
 
         if ((this.getName() == null) || (other.getName() == null)) {
             return false;
@@ -338,8 +424,7 @@ public class Party {
         return this.getName().equals(other.getName());
     }
 
-    @Override
-    public int hashCode() {
-        return super.hashCode();
+    public @NotNull Predicate<CommandSender> getSamePartyPredicate() {
+        return samePartyPredicate;
     }
 }

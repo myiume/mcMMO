@@ -1,23 +1,21 @@
 package com.gmail.nossr50.commands;
 
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.util.commands.CommandUtils;
+import com.gmail.nossr50.util.player.UserManager;
+import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.util.StringUtil;
-
-import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.util.commands.CommandUtils;
-import com.gmail.nossr50.util.player.UserManager;
-
-import com.google.common.collect.ImmutableList;
+import org.jetbrains.annotations.NotNull;
 
 public abstract class ToggleCommand implements TabExecutor {
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
+            @NotNull String label, String[] args) {
         switch (args.length) {
             case 0:
                 if (CommandUtils.noConsoleUsage(sender)) {
@@ -26,6 +24,10 @@ public abstract class ToggleCommand implements TabExecutor {
 
                 if (!hasSelfPermission(sender)) {
                     sender.sendMessage(command.getPermissionMessage());
+                    return true;
+                }
+
+                if (!CommandUtils.hasPlayerDataKey(sender)) {
                     return true;
                 }
 
@@ -39,17 +41,17 @@ public abstract class ToggleCommand implements TabExecutor {
                 }
 
                 String playerName = CommandUtils.getMatchedPlayerName(args[0]);
-                McMMOPlayer mcMMOPlayer = UserManager.getPlayer(playerName);
+                final McMMOPlayer mmoPlayer = UserManager.getPlayer(playerName);
 
-                if (!CommandUtils.checkPlayerExistence(sender, playerName, mcMMOPlayer)) {
+                if (!CommandUtils.checkPlayerExistence(sender, playerName, mmoPlayer)) {
                     return true;
                 }
 
-                if (CommandUtils.isOffline(sender, mcMMOPlayer.getPlayer())) {
+                if (CommandUtils.isOffline(sender, mmoPlayer.getPlayer())) {
                     return true;
                 }
 
-                applyCommandAction(mcMMOPlayer);
+                applyCommandAction(mmoPlayer);
                 sendSuccessMessage(sender, playerName);
                 return true;
 
@@ -59,18 +61,21 @@ public abstract class ToggleCommand implements TabExecutor {
     }
 
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        switch (args.length) {
-            case 1:
-                Set<String> playerNames = UserManager.getPlayerNames();
-                return StringUtil.copyPartialMatches(args[0], playerNames, new ArrayList<String>(playerNames.size()));
-            default:
-                return ImmutableList.of();
+    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
+            @NotNull String alias, String[] args) {
+        if (args.length == 1) {
+            List<String> playerNames = CommandUtils.getOnlinePlayerNames(sender);
+            return StringUtil.copyPartialMatches(args[0], playerNames,
+                    new ArrayList<>(playerNames.size()));
         }
+        return ImmutableList.of();
     }
 
     protected abstract boolean hasOtherPermission(CommandSender sender);
+
     protected abstract boolean hasSelfPermission(CommandSender sender);
-    protected abstract void applyCommandAction(McMMOPlayer mcMMOPlayer);
+
+    protected abstract void applyCommandAction(McMMOPlayer mmoPlayer);
+
     protected abstract void sendSuccessMessage(CommandSender sender, String playerName);
 }

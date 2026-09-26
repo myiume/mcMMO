@@ -1,106 +1,188 @@
 package com.gmail.nossr50.runnables.skills;
 
-import org.bukkit.Material;
-import org.bukkit.block.BlockState;
-import org.bukkit.block.BrewingStand;
-import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitRunnable;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
 import com.gmail.nossr50.events.skills.alchemy.McMMOPlayerBrewEvent;
 import com.gmail.nossr50.events.skills.alchemy.McMMOPlayerCatalysisEvent;
+import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.skills.alchemy.Alchemy;
 import com.gmail.nossr50.skills.alchemy.AlchemyPotionBrewer;
+import com.gmail.nossr50.util.CancellableRunnable;
+import com.gmail.nossr50.util.ContainerMetadataUtils;
 import com.gmail.nossr50.util.Misc;
 import com.gmail.nossr50.util.Permissions;
 import com.gmail.nossr50.util.player.UserManager;
+import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.block.BlockState;
+import org.bukkit.block.BrewingStand;
+import org.bukkit.entity.Player;
+import org.jetbrains.annotations.NotNull;
 
-public class AlchemyBrewTask extends BukkitRunnable {
-    private static double DEFAULT_BREW_SPEED = 1.0;
-    private static int    DEFAULT_BREW_TICKS = 400;
+public class AlchemyBrewTask extends CancellableRunnable {
+    private static final double DEFAULT_BREW_SPEED = 1.0;
+    private static final int DEFAULT_BREW_TICKS = 400;
 
-    private BlockState brewingStand;
+    private final BlockState brewingStand;
+    private final OfflinePlayer offlinePlayer;
+    private McMMOPlayer mmoPlayer;
     private double brewSpeed;
     private double brewTimer;
-    private Player player;
+    private int fuel;
+    private boolean firstRun = true;
+    private int ingredientLevel = 1;
 
-    public AlchemyBrewTask(BlockState brewingStand, Player player) {
+    @Deprecated(forRemoval = true, since = "2.2.010")
+    public AlchemyBrewTask(@NotNull BlockState brewingStand, Player ignored) {
+        this(brewingStand);
+    }
+
+    public AlchemyBrewTask(@NotNull BlockState brewingStand) {
+        offlinePlayer = ContainerMetadataUtils.getContainerOwner(brewingStand);
+        McMMOPlayer mmoPlayer = null;
+        if (offlinePlayer != null && offlinePlayer.isOnline()) {
+            mmoPlayer = UserManager.getPlayer(offlinePlayer.getPlayer());
+        }
+
         this.brewingStand = brewingStand;
-        this.player = player;
 
         brewSpeed = DEFAULT_BREW_SPEED;
         brewTimer = DEFAULT_BREW_TICKS;
 
-        if (player != null && !Misc.isNPCEntity(player) && Permissions.secondaryAbilityEnabled(player, SecondaryAbility.CATALYSIS)) {
-            double catalysis = UserManager.getPlayer(player).getAlchemyManager().getBrewSpeed();
+        if (mmoPlayer != null
+                && !Misc.isNPCEntityExcludingVillagers(mmoPlayer.getPlayer())
+                && Permissions.isSubSkillEnabled(mmoPlayer.getPlayer(),
+                SubSkillType.ALCHEMY_CATALYSIS)) {
+            ingredientLevel = mmoPlayer.getAlchemyManager().getTier();
 
-            if (Permissions.lucky(player, SkillType.ALCHEMY)) {
-                catalysis = UserManager.getPlayer(player).getAlchemyManager().getBrewSpeedLucky();
-            }
+            double catalysis = mmoPlayer.getAlchemyManager()
+                    .calculateBrewSpeed(Permissions.lucky(mmoPlayer.getPlayer(),
+                            PrimarySkillType.ALCHEMY));
 
-            McMMOPlayerCatalysisEvent event = new McMMOPlayerCatalysisEvent(player, catalysis);
+            McMMOPlayerCatalysisEvent event = new McMMOPlayerCatalysisEvent(mmoPlayer, catalysis);
             mcMMO.p.getServer().getPluginManager().callEvent(event);
+
             if (!event.isCancelled()) {
                 brewSpeed = catalysis;
             }
         }
 
-        if (Alchemy.brewingStandMap.containsKey(brewingStand)) {
-            Alchemy.brewingStandMap.get(brewingStand).cancel();
+        if (Alchemy.brewingStandMap.containsKey(brewingStand.getLocation())) {
+            Alchemy.brewingStandMap.get(brewingStand.getLocation()).cancel();
         }
 
-        Alchemy.brewingStandMap.put(brewingStand, this);
-        this.runTaskTimer(mcMMO.p, 1, 1);
+        fuel = ((BrewingStand) brewingStand).getFuelLevel();
+
+        if (((BrewingStand) brewingStand).getBrewingTime()
+                == -1) // Only decrement on our end if it isn't a vanilla ingredient.
+        {
+            fuel--;
+        }
+
+        Alchemy.brewingStandMap.put(brewingStand.getLocation(), this);
+        mcMMO.p.getFoliaLib().getScheduler()
+                .runAtLocationTimer(brewingStand.getLocation(), this, 1, 1);
     }
 
     @Override
     public void run() {
-        if (player == null || !player.isValid() || brewingStand == null || brewingStand.getType() != Material.BREWING_STAND) {
-            if (Alchemy.brewingStandMap.containsKey(brewingStand)) {
-                Alchemy.brewingStandMap.remove(brewingStand);
-            }
-
+        // Check if preconditions for brewing are not met
+        if (shouldCancelBrewing()) {
+            Alchemy.brewingStandMap.remove(brewingStand.getLocation());
             this.cancel();
-
             return;
         }
 
+        // Initialize the brewing stand on the first run
+        initializeBrewing();
+
+        // Update the brewing process timer
         brewTimer -= brewSpeed;
 
-        // Vanilla potion brewing completes when BrewingTime == 1
-        if (brewTimer < Math.max(brewSpeed, 2)) {
+        // Check if the brewing process should finish
+        if (isBrewingComplete()) {
             this.cancel();
             finish();
-        }
-        else {
-            ((BrewingStand) brewingStand).setBrewingTime((int) brewTimer);
+        } else {
+            updateBrewingTime();
         }
     }
 
-    private void finish() {
-        McMMOPlayerBrewEvent event = new McMMOPlayerBrewEvent(player, brewingStand);
-        mcMMO.p.getServer().getPluginManager().callEvent(event);
+    private boolean shouldCancelBrewing() {
+        if (offlinePlayer == null) {
+            return true;
+        }
+        if (brewingStand == null) {
+            return true;
+        }
+        if (brewingStand.getType() != Material.BREWING_STAND) {
+            return true;
+        }
+        return !AlchemyPotionBrewer.isValidIngredientByLevel(
+                getIngredientLevelUpdated(), ((BrewingStand) brewingStand).getInventory()
+                        .getContents()[Alchemy.INGREDIENT_SLOT]);
+    }
 
-        if (!event.isCancelled()) {
-            AlchemyPotionBrewer.finishBrewing(brewingStand, player, false);
+    private int getIngredientLevelUpdated() {
+        if (mmoPlayer != null) {
+            ingredientLevel = mmoPlayer.getAlchemyManager().getTier();
+            return ingredientLevel;
+        } else if (offlinePlayer.isOnline() && mmoPlayer == null) {
+            final McMMOPlayer fetchedMMOPlayer = UserManager.getPlayer(offlinePlayer.getPlayer());
+            if (fetchedMMOPlayer != null) {
+                this.mmoPlayer = fetchedMMOPlayer;
+                ingredientLevel = mmoPlayer.getAlchemyManager().getTier();
+            }
+            return ingredientLevel;
+        } else {
+            return ingredientLevel;
+        }
+    }
+
+    private void initializeBrewing() {
+        if (firstRun) {
+            firstRun = false;
+            ((BrewingStand) brewingStand).setFuelLevel(fuel);
+        }
+    }
+
+    private boolean isBrewingComplete() {
+        return brewTimer < Math.max(brewSpeed, 2);
+    }
+
+    private void updateBrewingTime() {
+        ((BrewingStand) brewingStand).setBrewingTime((int) brewTimer);
+    }
+
+
+    private void finish() {
+        if (mmoPlayer == null) {
+            // Still need to finish brewing if the player is null
+            AlchemyPotionBrewer.finishBrewing(brewingStand, null);
+        } else {
+            final McMMOPlayerBrewEvent event = new McMMOPlayerBrewEvent(mmoPlayer, brewingStand);
+            mcMMO.p.getServer().getPluginManager().callEvent(event);
+
+            if (!event.isCancelled()) {
+                AlchemyPotionBrewer.finishBrewing(brewingStand, mmoPlayer);
+            }
         }
 
-        Alchemy.brewingStandMap.remove(brewingStand);
+        Alchemy.brewingStandMap.remove(brewingStand.getLocation());
     }
 
     public void finishImmediately() {
         this.cancel();
 
-        AlchemyPotionBrewer.finishBrewing(brewingStand, player, true);
-        Alchemy.brewingStandMap.remove(brewingStand);
+        AlchemyPotionBrewer.finishBrewing(brewingStand, mmoPlayer);
+        Alchemy.brewingStandMap.remove(brewingStand.getLocation());
     }
 
     public void cancelBrew() {
         this.cancel();
 
         ((BrewingStand) brewingStand).setBrewingTime(-1);
-        Alchemy.brewingStandMap.remove(brewingStand);
+        Alchemy.brewingStandMap.remove(brewingStand.getLocation());
     }
 }

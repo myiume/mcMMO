@@ -1,58 +1,84 @@
 package com.gmail.nossr50.skills.archery;
 
+import static com.gmail.nossr50.util.PotionEffectUtil.getNauseaPotionEffectType;
+
+import com.gmail.nossr50.datatypes.interactions.NotificationType;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.skills.SkillManager;
+import com.gmail.nossr50.util.MetadataConstants;
+import com.gmail.nossr50.util.Misc;
+import com.gmail.nossr50.util.PaperUtil;
+import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.player.NotificationManager;
+import com.gmail.nossr50.util.random.ProbabilityUtil;
+import com.gmail.nossr50.util.skills.RankUtils;
 import org.bukkit.Location;
-import org.bukkit.entity.Arrow;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
-import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
+import org.bukkit.entity.Projectile;
 import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.skills.SkillManager;
-import com.gmail.nossr50.util.Misc;
-import com.gmail.nossr50.util.Permissions;
-import com.gmail.nossr50.util.player.UserManager;
-import com.gmail.nossr50.util.skills.CombatUtils;
-import com.gmail.nossr50.util.skills.SkillUtils;
+import org.bukkit.util.Vector;
 
 public class ArcheryManager extends SkillManager {
-    public ArcheryManager(McMMOPlayer mcMMOPlayer) {
-        super(mcMMOPlayer, SkillType.ARCHERY);
+    public ArcheryManager(McMMOPlayer mmoPlayer) {
+        super(mmoPlayer, PrimarySkillType.ARCHERY);
     }
 
     public boolean canDaze(LivingEntity target) {
-        return target instanceof Player && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.DAZE);
+        if (!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.ARCHERY_DAZE)) {
+            return false;
+        }
+
+        return target instanceof Player && Permissions.isSubSkillEnabled(getPlayer(),
+                SubSkillType.ARCHERY_DAZE);
     }
 
     public boolean canSkillShot() {
-        return getSkillLevel() >= Archery.skillShotIncreaseLevel && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.SKILL_SHOT);
+        if (!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.ARCHERY_SKILL_SHOT)) {
+            return false;
+        }
+
+        return Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.ARCHERY_SKILL_SHOT);
     }
 
     public boolean canRetrieveArrows() {
-        return Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.RETRIEVE);
+        if (!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.ARCHERY_ARROW_RETRIEVAL)) {
+            return false;
+        }
+
+        return Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.ARCHERY_ARROW_RETRIEVAL);
     }
 
     /**
      * Calculate bonus XP awarded for Archery when hitting a far-away target.
      *
      * @param target The {@link LivingEntity} damaged by the arrow
-     * @param damager The {@link Entity} who shot the arrow
+     * @param arrow The {@link Entity} who shot the arrow
      */
-    public void distanceXpBonus(LivingEntity target, Entity damager) {
-        Location firedLocation = Archery.stringToLocation(damager.getMetadata(mcMMO.arrowDistanceKey).get(0).asString());
-        Location targetLocation = target.getLocation();
-
-        if (firedLocation.getWorld() != targetLocation.getWorld()) {
-            return;
+    public static double distanceXpBonusMultiplier(LivingEntity target, Entity arrow) {
+        //Hacky Fix - some plugins spawn arrows and assign them to players after the ProjectileLaunchEvent fires
+        if (!arrow.hasMetadata(MetadataConstants.METADATA_KEY_ARROW_DISTANCE)) {
+            return 1;
         }
 
-        applyXpGain((int) (firedLocation.distanceSquared(targetLocation) * Archery.DISTANCE_XP_MULTIPLIER));
+        final Location firedLocation = (Location) arrow.getMetadata(
+                MetadataConstants.METADATA_KEY_ARROW_DISTANCE).get(0).value();
+        final Location targetLocation = target.getLocation();
+
+        if (firedLocation == null || firedLocation.getWorld() == null) {
+            return 1;
+        }
+
+        if (firedLocation.getWorld() != targetLocation.getWorld()) {
+            return 1;
+        }
+
+        return 1 + Math.min(firedLocation.distance(targetLocation), 50)
+                * Archery.DISTANCE_XP_MULTIPLIER;
     }
 
     /**
@@ -60,51 +86,83 @@ public class ArcheryManager extends SkillManager {
      *
      * @param target The {@link LivingEntity} damaged by the arrow
      */
-    public void retrieveArrows(LivingEntity target) {
-        if (SkillUtils.activationSuccessful(SecondaryAbility.RETRIEVE, getPlayer(), getSkillLevel(), activationChance)) {
+    public void retrieveArrows(LivingEntity target, Projectile projectile) {
+        if (projectile.hasMetadata(MetadataConstants.METADATA_KEY_TRACKED_ARROW)) {
             Archery.incrementTrackerValue(target);
+            projectile.removeMetadata(MetadataConstants.METADATA_KEY_TRACKED_ARROW,
+                    mcMMO.p); //Only 1 entity per projectile
         }
     }
 
     /**
-     * Handle the effects of the Daze ability
+     * Handle the effects of the Daze ability.
+     * <p>
+     * On Paper and Paper forks (including Folia) the defender's view direction is changed via
+     * {@code Player.lookAt()} which does <b>not</b> teleport the player, avoiding race conditions
+     * with death or world-change events (see GitHub #5191). On Spigot the teleport is scheduled
+     * for the next tick via FoliaLib to shift Pitch reliably.
      *
      * @param defender The {@link Player} being affected by the ability
-     * @param arrow The {@link Arrow} that was fired
      */
-    public double daze(Player defender, Arrow arrow) {
-        if (!SkillUtils.activationSuccessful(SecondaryAbility.DAZE, getPlayer(), getSkillLevel(), activationChance)) {
+    public double daze(Player defender) {
+        if (!ProbabilityUtil.isSkillRNGSuccessful(SubSkillType.ARCHERY_DAZE, mmoPlayer)) {
             return 0;
         }
 
-        Location dazedLocation = defender.getLocation();
-        dazedLocation.setPitch(90 - Misc.getRandom().nextInt(181));
+        final float randomPitch = 90 - Misc.getRandom().nextInt(181);
 
-        defender.teleport(dazedLocation);
-        defender.addPotionEffect(new PotionEffect(PotionEffectType.CONFUSION, 20 * 10, 10));
-
-        if (UserManager.getPlayer(defender).useChatNotifications()) {
-            defender.sendMessage(LocaleLoader.getString("Combat.TouchedFuzzy"));
+        if (PaperUtil.canLookAt()) {
+            // Paper/Folia: use lookAt() to change view direction without teleporting
+            final Location eyeLocation = defender.getEyeLocation();
+            final double yawRad = Math.toRadians(eyeLocation.getYaw());
+            final double pitchRad = Math.toRadians(randomPitch);
+            final double cosPitch = Math.cos(pitchRad);
+            final Vector direction = new Vector(
+                    -cosPitch * Math.sin(yawRad),
+                    -Math.sin(pitchRad),
+                    cosPitch * Math.cos(yawRad));
+            final Location target = eyeLocation.add(direction.multiply(10));
+            PaperUtil.lookAt(defender, target.getX(), target.getY(), target.getZ());
+        } else {
+            // Spigot: schedule teleport for next tick — teleports during damage events are ignored
+            final Location dazedLocation = defender.getLocation();
+            dazedLocation.setPitch(randomPitch);
+            final var originalWorld = dazedLocation.getWorld();
+            mcMMO.p.getFoliaLib().getScheduler().runAtEntity(
+                    defender, task -> {
+                        if (defender.isValid()
+                                && defender.getWorld() == originalWorld) {
+                            defender.teleport(dazedLocation);
+                        }
+                    });
         }
 
-        if (mcMMOPlayer.useChatNotifications()) {
-            getPlayer().sendMessage(LocaleLoader.getString("Combat.TargetDazed"));
+        defender.addPotionEffect(new PotionEffect(getNauseaPotionEffectType(), 20 * 10, 10));
+
+        if (NotificationManager.doesPlayerUseNotifications(defender)) {
+            NotificationManager.sendPlayerInformation(defender, NotificationType.SUBSKILL_MESSAGE,
+                    "Combat.TouchedFuzzy");
         }
 
-        return CombatUtils.callFakeDamageEvent(arrow, defender, DamageCause.PROJECTILE, Archery.dazeModifier);
+        if (mmoPlayer.useChatNotifications()) {
+            NotificationManager.sendPlayerInformation(getPlayer(),
+                    NotificationType.SUBSKILL_MESSAGE, "Combat.TargetDazed");
+        }
+
+        return Archery.dazeBonusDamage;
     }
 
     /**
-     * Handle the effects of the Skill Shot ability
+     * Calculates the damage to deal after Skill Shot has been applied
      *
-     * @param target The {@link LivingEntity} being affected by the ability
-     * @param damage The amount of damage initially dealt by the event
-     * @param arrow The {@link Arrow} that was fired
+     * @param oldDamage The raw damage value of this arrow before we modify it
      */
-    public double skillShot(LivingEntity target, double damage, Arrow arrow) {
-        double damageBonusPercent = Math.min(((getSkillLevel() / Archery.skillShotIncreaseLevel) * Archery.skillShotIncreasePercentage), Archery.skillShotMaxBonusPercentage);
-        double archeryBonus = Math.min(damage * damageBonusPercent, Archery.skillShotMaxBonusDamage);
-
-        return CombatUtils.callFakeDamageEvent(arrow, target, DamageCause.PROJECTILE, archeryBonus);
+    public double skillShot(double oldDamage) {
+        if (ProbabilityUtil.isNonRNGSkillActivationSuccessful(SubSkillType.ARCHERY_SKILL_SHOT,
+                mmoPlayer)) {
+            return Archery.getSkillShotBonusDamage(getPlayer(), oldDamage);
+        } else {
+            return oldDamage;
+        }
     }
 }

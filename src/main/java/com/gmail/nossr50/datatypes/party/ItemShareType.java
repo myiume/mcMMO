@@ -1,10 +1,9 @@
 package com.gmail.nossr50.datatypes.party;
 
-import org.bukkit.inventory.ItemStack;
-
 import com.gmail.nossr50.locale.LocaleLoader;
 import com.gmail.nossr50.util.ItemUtils;
-import com.gmail.nossr50.util.StringUtils;
+import com.gmail.nossr50.util.text.StringUtils;
+import org.bukkit.inventory.ItemStack;
 
 public enum ItemShareType {
     LOOT,
@@ -16,17 +15,13 @@ public enum ItemShareType {
     public static ItemShareType getShareType(ItemStack itemStack) {
         if (ItemUtils.isMobDrop(itemStack)) {
             return LOOT;
-        }
-        else if (ItemUtils.isMiningDrop(itemStack)) {
+        } else if (ItemUtils.isMiningDrop(itemStack)) {
             return MINING;
-        }
-        else if (ItemUtils.isHerbalismDrop(itemStack)) {
+        } else if (ItemUtils.isHerbalismDrop(itemStack)) {
             return HERBALISM;
-        }
-        else if (ItemUtils.isWoodcuttingDrop(itemStack)) {
+        } else if (ItemUtils.isWoodcuttingDrop(itemStack)) {
             return WOODCUTTING;
-        }
-        else if (ItemUtils.isMiscDrop(itemStack)) {
+        } else if (ItemUtils.isMiscDrop(itemStack)) {
             return MISC;
         }
 
@@ -34,6 +29,7 @@ public enum ItemShareType {
     }
 
     public String getLocaleString() {
-        return LocaleLoader.getString("Party.ItemShare.Category." + StringUtils.getCapitalized(this.toString()));
+        return LocaleLoader.getString(
+                "Party.ItemShare.Category." + StringUtils.getCapitalized(this.toString()));
     }
 }

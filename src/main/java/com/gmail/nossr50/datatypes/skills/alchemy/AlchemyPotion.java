@@ -1,101 +1,160 @@
 package com.gmail.nossr50.datatypes.skills.alchemy;
 
-import java.util.List;
+import static java.util.Objects.requireNonNull;
+
+import com.gmail.nossr50.mcMMO;
 import java.util.Map;
 import java.util.Map.Entry;
-
+import java.util.Objects;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.potion.PotionEffect;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class AlchemyPotion {
-    private short dataValue;
-    private String name;
-    private List<String> lore;
-    private List<PotionEffect> effects;
-    private Map<ItemStack, Short> children;
+    private final @NotNull String potionConfigName;
+    private final @NotNull ItemStack potionItemStack;
+    private final @NotNull ItemMeta potionItemMeta;
+    private final @NotNull Map<ItemStack, String> alchemyPotionChildren;
 
-    public AlchemyPotion(short dataValue, String name, List<String> lore, List<PotionEffect> effects, Map<ItemStack, Short> children) {
-        this.dataValue = dataValue;
-        this.lore = lore;
-        this.name = name;
-        this.effects = effects;
-        this.children = children;
+    public AlchemyPotion(@NotNull String potionConfigName, @NotNull ItemStack potionItemStack,
+            @NotNull Map<ItemStack, String> alchemyPotionChildren) {
+        this.potionConfigName = requireNonNull(potionConfigName, "potionConfigName cannot be null");
+        this.potionItemStack = requireNonNull(potionItemStack, "potionItemStack cannot be null");
+        this.alchemyPotionChildren = requireNonNull(alchemyPotionChildren,
+                "alchemyPotionChildren cannot be null");
+        this.potionItemMeta = requireNonNull(potionItemStack.getItemMeta(),
+                "potionItemMeta cannot be null"); // The potion item meta should never be null because it is a potion, but if it is null, then something went terribly wrong
     }
 
-    public String toString() {
-        return "AlchemyPotion{" + dataValue + "," + name + ",Effects[" + effects.size() + "], Children[" + children.size() + "]}";
+    public @NotNull ItemStack toItemStack(int amount) {
+        final ItemStack clone = potionItemStack.clone();
+        clone.setAmount(Math.max(1, amount));
+        return clone;
     }
 
-    public ItemStack toItemStack() {
-        return toItemStack(1);
+    public @NotNull Map<ItemStack, String> getAlchemyPotionChildren() {
+        return alchemyPotionChildren;
     }
 
-    public ItemStack toItemStack(int amount) {
-        ItemStack potion = new ItemStack(Material.POTION, amount, this.getDataValue());
-        PotionMeta meta = (PotionMeta) potion.getItemMeta();
-        meta.setDisplayName(this.getName());
-        if (this.getLore() != null && !this.getLore().isEmpty()) {
-            meta.setLore(this.getLore());
-        }
-        if (!this.getEffects().isEmpty()) {
-            for (PotionEffect effect : this.getEffects()) {
-                meta.addCustomEffect(effect, true);
-            }
-        }
-        potion.setItemMeta(meta);
-        return potion;
-    }
-
-    public short getDataValue() {
-        return dataValue;
-    }
-
-    public void setDataValue(short data_value) {
-        this.dataValue = data_value;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public List<String> getLore() {
-        return lore;
-    }
-
-    public void setLore(List<String> lore) {
-        this.lore = lore;
-    }
-
-    public List<PotionEffect> getEffects() {
-        return effects;
-    }
-
-    public void setEffects(List<PotionEffect> effects) {
-        this.effects = effects;
-    }
-
-    public Map<ItemStack, Short> getChildren() {
-        return children;
-    }
-
-    public void setChildren(Map<ItemStack, Short> children) {
-        this.children = children;
-    }
-
-    public Short getChildDataValue(ItemStack ingredient) {
-        if (!children.isEmpty()) {
-            for (Entry<ItemStack, Short> child : children.entrySet()) {
+    public @Nullable AlchemyPotion getChild(@NotNull ItemStack ingredient) {
+        if (!alchemyPotionChildren.isEmpty()) {
+            for (Entry<ItemStack, String> child : alchemyPotionChildren.entrySet()) {
                 if (ingredient.isSimilar(child.getKey())) {
-                    return child.getValue();
+                    return mcMMO.p.getPotionConfig().getPotion(child.getValue());
                 }
             }
         }
-        return -1;
+        return null;
+    }
+
+    public boolean isSimilarPotion(@NotNull ItemStack otherPotion) {
+        return isSimilarPotion(otherPotion, otherPotion.getItemMeta());
+    }
+
+    public boolean isSimilarPotion(@NotNull ItemStack otherPotion, @Nullable ItemMeta otherMeta) {
+        requireNonNull(otherPotion, "otherPotion cannot be null");
+
+        if (otherPotion.getType() != potionItemStack.getType()) {
+            return false;
+        }
+
+        // no potion meta, no match
+        if (otherMeta == null) {
+            return false;
+        }
+
+        /*
+         * Compare custom effects on both potions.
+         */
+
+        final PotionMeta otherPotionMeta = (PotionMeta) otherMeta;
+        // compare custom effects on both potions, this has to be done in two traversals
+        // comparing thisPotionMeta -> otherPotionMeta and otherPotionMeta -> thisPotionMeta
+        if (hasDifferingCustomEffects(getAlchemyPotionMeta(), otherPotionMeta)
+                || hasDifferingCustomEffects(otherPotionMeta, getAlchemyPotionMeta())) {
+            return false;
+        }
+
+        if (getAlchemyPotionMeta().getBasePotionType() != otherPotionMeta.getBasePotionType()) {
+            return false;
+        }
+
+        /*
+         * If one potion has lore and the other does not, then they are not the same potion.
+         * If both have lore, compare the lore.
+         * If neither have lore, they may be the same potion.
+         */
+        if (!otherPotionMeta.hasLore() && getAlchemyPotionMeta().hasLore()
+                || !getAlchemyPotionMeta().hasLore() && otherPotionMeta.hasLore()) {
+            return false;
+        }
+
+        return !otherPotionMeta.hasLore() || !getAlchemyPotionMeta().hasLore()
+                || otherPotionMeta.getLore().equals(getAlchemyPotionMeta().getLore());
+    }
+
+    private boolean hasDifferingCustomEffects(PotionMeta potionMeta, PotionMeta otherPotionMeta) {
+        for (final PotionEffect effect : potionMeta.getCustomEffects()) {
+            // Effect order carries no meaning, so every effect just needs a counterpart
+            if (!hasMatchingCustomEffect(effect, otherPotionMeta)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasMatchingCustomEffect(PotionEffect effect, PotionMeta otherPotionMeta) {
+        for (final PotionEffect otherEffect : otherPotionMeta.getCustomEffects()) {
+            if (Objects.equals(effect.getType(), otherEffect.getType())
+                    && effect.getAmplifier() == otherEffect.getAmplifier()
+                    && effect.getDuration() == otherEffect.getDuration()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public PotionMeta getAlchemyPotionMeta() {
+        return (PotionMeta) potionItemMeta;
+    }
+
+    public boolean isSplash() {
+        return potionItemStack.getType() == Material.SPLASH_POTION;
+    }
+
+    public boolean isLingering() {
+        return potionItemStack.getType() == Material.LINGERING_POTION;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        AlchemyPotion that = (AlchemyPotion) o;
+        return Objects.equals(potionConfigName, that.potionConfigName) && Objects.equals(
+                potionItemStack, that.potionItemStack) && Objects.equals(alchemyPotionChildren,
+                that.alchemyPotionChildren);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(potionConfigName, potionItemStack, alchemyPotionChildren);
+    }
+
+    @Override
+    public String toString() {
+        return "AlchemyPotion{" +
+                "potionConfigName='" + potionConfigName + '\'' +
+                ", potionItemStack=" + potionItemStack +
+                ", alchemyPotionChildren=" + alchemyPotionChildren +
+                '}';
     }
 }

@@ -1,105 +1,136 @@
 package com.gmail.nossr50.commands.skills;
 
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.random.ProbabilityUtil;
+import com.gmail.nossr50.util.skills.CombatUtils;
+import com.gmail.nossr50.util.skills.RankUtils;
+import com.gmail.nossr50.util.skills.SkillUtils;
+import com.gmail.nossr50.util.text.TextComponentFactory;
 import java.util.ArrayList;
 import java.util.List;
-
+import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
-
-import com.gmail.nossr50.config.AdvancedConfig;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.skills.swords.Swords;
-import com.gmail.nossr50.util.Permissions;
 
 public class SwordsCommand extends SkillCommand {
     private String counterChance;
     private String counterChanceLucky;
-    private int bleedLength;
-    private String bleedChance;
-    private String bleedChanceLucky;
     private String serratedStrikesLength;
     private String serratedStrikesLengthEndurance;
 
+    private String rupturePureTickDamageAgainstPlayers, rupturePureTickDamageAgainstMobs,
+            ruptureLengthSecondsAgainstPlayers, ruptureLengthSecondsAgainstMobs,
+            ruptureChanceToApply, ruptureChanceToApplyLucky;
+
     private boolean canCounter;
     private boolean canSerratedStrike;
-    private boolean canBleed;
+    private boolean canRupture;
 
     public SwordsCommand() {
-        super(SkillType.SWORDS);
+        super(PrimarySkillType.SWORDS);
     }
 
     @Override
-    protected void dataCalculations(Player player, float skillValue, boolean isLucky) {
+    protected void dataCalculations(Player player, float skillValue) {
+        // SWORDS_COUNTER_ATTACK
+        if (canCounter) {
+            String[] counterStrings = ProbabilityUtil.getRNGDisplayValues(mmoPlayer,
+                    SubSkillType.SWORDS_COUNTER_ATTACK);
+            counterChance = counterStrings[0];
+            counterChanceLucky = counterStrings[1];
+        }
+
+        // SWORDS_RUPTURE
+        if (canRupture) {
+            int ruptureRank = RankUtils.getRank(player, SubSkillType.SWORDS_RUPTURE);
+            ruptureLengthSecondsAgainstPlayers = String.valueOf(
+                    mcMMO.p.getAdvancedConfig().getRuptureDurationSeconds(true));
+            ruptureLengthSecondsAgainstMobs = String.valueOf(
+                    mcMMO.p.getAdvancedConfig().getRuptureDurationSeconds(false));
+
+            rupturePureTickDamageAgainstPlayers = String.valueOf(
+                    mcMMO.p.getAdvancedConfig().getRuptureTickDamage(true, ruptureRank));
+            rupturePureTickDamageAgainstMobs = String.valueOf(
+                    mcMMO.p.getAdvancedConfig().getRuptureTickDamage(false, ruptureRank));
+
+            ruptureChanceToApply =
+                    mcMMO.p.getAdvancedConfig().getRuptureChanceToApplyOnHit(ruptureRank) + "%";
+            ruptureChanceToApplyLucky = String.valueOf(
+                    mcMMO.p.getAdvancedConfig().getRuptureChanceToApplyOnHit(ruptureRank) * 1.33);
+        }
+
         // SERRATED STRIKES
         if (canSerratedStrike) {
             String[] serratedStrikesStrings = calculateLengthDisplayValues(player, skillValue);
             serratedStrikesLength = serratedStrikesStrings[0];
             serratedStrikesLengthEndurance = serratedStrikesStrings[1];
         }
-
-        // BLEED
-        if (canBleed) {
-            bleedLength = (skillValue >= AdvancedConfig.getInstance().getMaxBonusLevel(SecondaryAbility.BLEED)) ? Swords.bleedMaxTicks : Swords.bleedBaseTicks;
-
-            String[] bleedStrings = calculateAbilityDisplayValues(skillValue, SecondaryAbility.BLEED, isLucky);
-            bleedChance = bleedStrings[0];
-            bleedChanceLucky = bleedStrings[1];
-        }
-
-        // COUNTER
-        if (canCounter) {
-            String[] counterStrings = calculateAbilityDisplayValues(skillValue, SecondaryAbility.COUNTER, isLucky);
-            counterChance = counterStrings[0];
-            counterChanceLucky = counterStrings[1];
-        }
     }
 
     @Override
     protected void permissionsCheck(Player player) {
-        canBleed = Permissions.secondaryAbilityEnabled(player, SecondaryAbility.BLEED);
-        canCounter = Permissions.secondaryAbilityEnabled(player, SecondaryAbility.COUNTER);
-        canSerratedStrike = Permissions.serratedStrikes(player);
+        canRupture = SkillUtils.canUseSubskill(player, SubSkillType.SWORDS_RUPTURE);
+        canCounter = SkillUtils.canUseSubskill(player, SubSkillType.SWORDS_COUNTER_ATTACK);
+        canSerratedStrike =
+                RankUtils.hasUnlockedSubskill(player, SubSkillType.SWORDS_SERRATED_STRIKES)
+                        && Permissions.serratedStrikes(player);
     }
 
     @Override
-    protected List<String> effectsDisplay() {
-        List<String> messages = new ArrayList<String>();
+    protected List<String> statsDisplay(Player player, float skillValue, boolean hasEndurance,
+            boolean isLucky) {
+        List<String> messages = new ArrayList<>();
 
         if (canCounter) {
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Swords.Effect.0"), LocaleLoader.getString("Swords.Effect.1", percent.format(1.0D / Swords.counterAttackModifier))));
+            messages.add(getStatMessage(SubSkillType.SWORDS_COUNTER_ATTACK, counterChance)
+                    + (isLucky ? LocaleLoader.getString("Perks.Lucky.Bonus", counterChanceLucky)
+                    : ""));
+        }
+
+        if (canRupture) {
+            messages.add(getStatMessage(SubSkillType.SWORDS_RUPTURE, ruptureChanceToApply)
+                    + (isLucky ? LocaleLoader.getString("Perks.Lucky.Bonus",
+                    ruptureChanceToApplyLucky) : ""));
+            messages.add(getStatMessage(true, true, SubSkillType.SWORDS_RUPTURE,
+                    ruptureLengthSecondsAgainstPlayers,
+                    ruptureLengthSecondsAgainstMobs));
+
+            messages.add(LocaleLoader.getString("Swords.SubSkill.Rupture.Stat.TickDamage",
+                    rupturePureTickDamageAgainstPlayers, rupturePureTickDamageAgainstMobs));
+
+            messages.add(LocaleLoader.getString("Swords.Combat.Rupture.Note.Update.One"));
         }
 
         if (canSerratedStrike) {
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Swords.Effect.2"), LocaleLoader.getString("Swords.Effect.3", percent.format(1.0D / Swords.serratedStrikesModifier))));
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Swords.Effect.4"), LocaleLoader.getString("Swords.Effect.5", Swords.serratedStrikesBleedTicks)));
+            messages.add(getStatMessage(SubSkillType.SWORDS_SERRATED_STRIKES, serratedStrikesLength)
+                    + (hasEndurance ? LocaleLoader.getString("Perks.ActivationTime.Bonus",
+                    serratedStrikesLengthEndurance) : ""));
         }
 
-        if (canBleed) {
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Swords.Effect.6"), LocaleLoader.getString("Swords.Effect.7")));
+        if (SkillUtils.canUseSubskill(player, SubSkillType.SWORDS_STAB)) {
+            messages.add(getStatMessage(SubSkillType.SWORDS_STAB,
+                    String.valueOf(mmoPlayer.getSwordsManager().getStabDamage())));
+        }
+
+        if (SkillUtils.canUseSubskill(player, SubSkillType.SWORDS_SWORDS_LIMIT_BREAK)) {
+            messages.add(getStatMessage(SubSkillType.SWORDS_SWORDS_LIMIT_BREAK,
+                    String.valueOf(CombatUtils.getLimitBreakDamageAgainstQuality(player,
+                            SubSkillType.SWORDS_SWORDS_LIMIT_BREAK, 1000))));
         }
 
         return messages;
     }
 
     @Override
-    protected List<String> statsDisplay(Player player, float skillValue, boolean hasEndurance, boolean isLucky) {
-        List<String> messages = new ArrayList<String>();
+    protected List<Component> getTextComponents(Player player) {
+        List<Component> textComponents = new ArrayList<>();
 
-        if (canCounter) {
-            messages.add(LocaleLoader.getString("Swords.Combat.Counter.Chance", counterChance) + (isLucky ? LocaleLoader.getString("Perks.Lucky.Bonus", counterChanceLucky) : ""));
-        }
+        TextComponentFactory.appendSubSkillTextComponents(player, textComponents,
+                PrimarySkillType.SWORDS);
 
-        if (canBleed) {
-            messages.add(LocaleLoader.getString("Swords.Combat.Bleed.Length", bleedLength));
-            messages.add(LocaleLoader.getString("Swords.Combat.Bleed.Note"));
-            messages.add(LocaleLoader.getString("Swords.Combat.Bleed.Chance", bleedChance) + (isLucky ? LocaleLoader.getString("Perks.Lucky.Bonus", bleedChanceLucky) : ""));
-        }
-
-        if (canSerratedStrike) {
-            messages.add(LocaleLoader.getString("Swords.SS.Length", serratedStrikesLength) + (hasEndurance ? LocaleLoader.getString("Perks.ActivationTime.Bonus", serratedStrikesLengthEndurance) : ""));
-        }
-
-        return messages;
+        return textComponents;
     }
 }

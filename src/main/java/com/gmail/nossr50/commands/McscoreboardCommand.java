@@ -1,26 +1,35 @@
 package com.gmail.nossr50.commands;
 
+import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.commands.CommandUtils;
+import com.gmail.nossr50.util.scoreboards.ScoreboardManager;
+import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.List;
-
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.util.StringUtil;
-
-import com.gmail.nossr50.config.Config;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.commands.CommandUtils;
-import com.gmail.nossr50.util.scoreboards.ScoreboardManager;
-
-import com.google.common.collect.ImmutableList;
+import org.jetbrains.annotations.NotNull;
 
 public class McscoreboardCommand implements TabExecutor {
     private static final List<String> FIRST_ARGS = ImmutableList.of("keep", "time", "clear");
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
+            @NotNull String label, String[] args) {
         if (CommandUtils.noConsoleUsage(sender)) {
+            return true;
+        }
+
+        if (!mcMMO.p.getGeneralConfig().getScoreboardsEnabled()) {
+            sender.sendMessage(LocaleLoader.getString("Scoreboard.Disabled"));
+            return true;
+        }
+
+        if (!ScoreboardManager.isPlayerBoardSetup(sender.getName())) {
+            sender.sendMessage(LocaleLoader.getString("Scoreboard.NotSetupYet"));
             return true;
         }
 
@@ -33,7 +42,8 @@ public class McscoreboardCommand implements TabExecutor {
                 }
 
                 if (args[0].equalsIgnoreCase("keep")) {
-                    if (!Config.getInstance().getAllowKeepBoard()) {
+                    if (!mcMMO.p.getGeneralConfig().getAllowKeepBoard()
+                            || !mcMMO.p.getGeneralConfig().getScoreboardsEnabled()) {
                         sender.sendMessage(LocaleLoader.getString("Commands.Disabled"));
                         return true;
                     }
@@ -71,13 +81,13 @@ public class McscoreboardCommand implements TabExecutor {
     }
 
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        switch (args.length) {
-            case 1:
-                return StringUtil.copyPartialMatches(args[0], FIRST_ARGS, new ArrayList<String>(FIRST_ARGS.size()));
-            default:
-                return ImmutableList.of();
+    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
+            @NotNull String alias, String[] args) {
+        if (args.length == 1) {
+            return StringUtil.copyPartialMatches(args[0], FIRST_ARGS,
+                    new ArrayList<>(FIRST_ARGS.size()));
         }
+        return ImmutableList.of();
     }
 
     private boolean help(CommandSender sender) {

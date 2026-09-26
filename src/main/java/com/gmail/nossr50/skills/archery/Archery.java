@@ -1,50 +1,40 @@
 package com.gmail.nossr50.skills.archery;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import com.gmail.nossr50.api.ItemSpawnReason;
+import com.gmail.nossr50.config.experience.ExperienceConfig;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.ItemUtils;
+import com.gmail.nossr50.util.skills.RankUtils;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
-import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.AdvancedConfig;
-import com.gmail.nossr50.util.Misc;
+import org.jetbrains.annotations.NotNull;
 
 public class Archery {
-    private static List<TrackedEntity> trackedEntities = new ArrayList<TrackedEntity>();
+    private static final Map<UUID, TrackedEntity> trackedEntities = new ConcurrentHashMap<>();
 
-    public static int    skillShotIncreaseLevel      = AdvancedConfig.getInstance().getSkillShotIncreaseLevel();
-    public static double skillShotIncreasePercentage = AdvancedConfig.getInstance().getSkillShotIncreasePercentage();
-    public static double skillShotMaxBonusPercentage = AdvancedConfig.getInstance().getSkillShotBonusMax();
-    public static double skillShotMaxBonusDamage     = AdvancedConfig.getInstance().getSkillShotDamageMax();
+    public static double skillShotMaxBonusDamage = mcMMO.p.getAdvancedConfig()
+            .getSkillShotDamageMax();
 
-    public static double dazeModifier      = AdvancedConfig.getInstance().getDazeModifier();
+    public static double dazeBonusDamage = mcMMO.p.getAdvancedConfig().getDazeBonusDamage();
 
-    public static final double DISTANCE_XP_MULTIPLIER = 0.025;
+    public static final double DISTANCE_XP_MULTIPLIER = ExperienceConfig.getInstance()
+            .getArcheryDistanceMultiplier();
 
     protected static void incrementTrackerValue(LivingEntity livingEntity) {
-        for (TrackedEntity trackedEntity : trackedEntities) {
-            if (trackedEntity.getLivingEntity().getEntityId() == livingEntity.getEntityId()) {
-                trackedEntity.incrementArrowCount();
-                return;
-            }
-        }
-
-        addToTracker(livingEntity); // If the entity isn't tracked yet
-    }
-
-    protected static void addToTracker(LivingEntity livingEntity) {
-        TrackedEntity trackedEntity = new TrackedEntity(livingEntity);
-
+        final TrackedEntity trackedEntity = trackedEntities.computeIfAbsent(
+                livingEntity.getUniqueId(), k -> new TrackedEntity(livingEntity));
         trackedEntity.incrementArrowCount();
-        trackedEntities.add(trackedEntity);
     }
 
     protected static void removeFromTracker(TrackedEntity trackedEntity) {
-        trackedEntities.remove(trackedEntity);
+        trackedEntities.remove(trackedEntity.getID());
     }
 
     /**
@@ -52,25 +42,23 @@ public class Archery {
      *
      * @param livingEntity The entity hit by the arrows
      */
-    public static void arrowRetrievalCheck(LivingEntity livingEntity) {
-        for (Iterator<TrackedEntity> entityIterator = trackedEntities.iterator(); entityIterator.hasNext();) {
-            TrackedEntity trackedEntity = entityIterator.next();
-
-            if (trackedEntity.getID() == livingEntity.getUniqueId()) {
-                Misc.dropItems(livingEntity.getLocation(), new ItemStack(Material.ARROW), trackedEntity.getArrowCount());
-                entityIterator.remove();
-                return;
-            }
+    public static void arrowRetrievalCheck(@NotNull LivingEntity livingEntity) {
+        final TrackedEntity trackedEntity = trackedEntities.remove(livingEntity.getUniqueId());
+        if (trackedEntity != null) {
+            ItemUtils.spawnItems(null, livingEntity.getLocation(),
+                    new ItemStack(Material.ARROW), trackedEntity.getArrowCount(),
+                    ItemSpawnReason.ARROW_RETRIEVAL_ACTIVATED);
         }
     }
 
-    public static Location stringToLocation(String location) {
-        String[] values = location.split(",");
-
-        return new Location(mcMMO.p.getServer().getWorld(values[0]), Double.parseDouble(values[1]), Double.parseDouble(values[2]), Double.parseDouble(values[3]), Float.parseFloat(values[4]), Float.parseFloat(values[5]));
+    public static double getSkillShotBonusDamage(Player player, double oldDamage) {
+        final double damageBonusPercent = getDamageBonusPercent(player);
+        final double newDamage = oldDamage + (oldDamage * damageBonusPercent);
+        return Math.min(newDamage, oldDamage + Archery.skillShotMaxBonusDamage);
     }
 
-    public static String locationToString(Location location) {
-        return location.getWorld().getName() + "," + location.getX() + "," + location.getY() + "," + location.getZ() + "," + location.getYaw() + "," + location.getPitch();
+    public static double getDamageBonusPercent(Player player) {
+        return ((RankUtils.getRank(player, SubSkillType.ARCHERY_SKILL_SHOT))
+                * (mcMMO.p.getAdvancedConfig().getSkillShotRankDamageMultiplier()) / 100.0D);
     }
 }

@@ -4,14 +4,16 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.Cancellable;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.player.PlayerEvent;
+import org.jetbrains.annotations.NotNull;
 
 public class McMMOPartyAllianceChangeEvent extends PlayerEvent implements Cancellable {
-    private String oldAlly;
-    private String newAlly;
-    private EventReason reason;
+    private final String oldAlly;
+    private final String newAlly;
+    private final EventReason reason;
     private boolean cancelled;
 
-    public McMMOPartyAllianceChangeEvent(Player player, String oldAlly, String newAlly, EventReason reason) {
+    public McMMOPartyAllianceChangeEvent(Player player, String oldAlly, String newAlly,
+            EventReason reason) {
         super(player);
 
         if (newAlly != null) {
@@ -62,10 +64,12 @@ public class McMMOPartyAllianceChangeEvent extends PlayerEvent implements Cancel
         /**
          * Any reason that doesn't fit elsewhere.
          */
-        CUSTOM;
+        CUSTOM
     }
 
-    /** Following are required for Cancellable **/
+    /**
+     * Following are required for Cancellable
+     **/
     @Override
     public boolean isCancelled() {
         return cancelled;
@@ -76,11 +80,13 @@ public class McMMOPartyAllianceChangeEvent extends PlayerEvent implements Cancel
         this.cancelled = cancelled;
     }
 
-    /** Rest of file is required boilerplate for custom events **/
+    /**
+     * Rest of file is required boilerplate for custom events
+     **/
     private static final HandlerList handlers = new HandlerList();
 
     @Override
-    public HandlerList getHandlers() {
+    public @NotNull HandlerList getHandlers() {
         return handlers;
     }
 

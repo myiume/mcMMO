@@ -1,16 +1,23 @@
 package com.gmail.nossr50.events.skills.fishing;
 
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.events.skills.McMMOPlayerSkillEvent;
+import com.gmail.nossr50.util.player.UserManager;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Cancellable;
-
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.events.skills.McMMOPlayerSkillEvent;
 
 public class McMMOPlayerFishingEvent extends McMMOPlayerSkillEvent implements Cancellable {
     private boolean cancelled;
 
+    @Deprecated(forRemoval = true, since = "2.2.010")
     protected McMMOPlayerFishingEvent(Player player) {
-        super(player, SkillType.FISHING);
+        super(UserManager.getPlayer(player), PrimarySkillType.FISHING);
+        cancelled = false;
+    }
+
+    protected McMMOPlayerFishingEvent(McMMOPlayer mmoPlayer) {
+        super(mmoPlayer, PrimarySkillType.FISHING);
         cancelled = false;
     }
 

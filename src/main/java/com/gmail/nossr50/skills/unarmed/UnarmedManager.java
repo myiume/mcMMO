@@ -1,82 +1,114 @@
 package com.gmail.nossr50.skills.unarmed;
 
+import static com.gmail.nossr50.util.random.ProbabilityUtil.isSkillRNGSuccessful;
+
+import com.gmail.nossr50.api.ItemSpawnReason;
+import com.gmail.nossr50.datatypes.interactions.NotificationType;
+import com.gmail.nossr50.datatypes.player.McMMOPlayer;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.datatypes.skills.SuperAbilityType;
+import com.gmail.nossr50.datatypes.skills.ToolType;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.skills.SkillManager;
+import com.gmail.nossr50.util.EventUtils;
+import com.gmail.nossr50.util.ItemUtils;
+import com.gmail.nossr50.util.MetadataConstants;
+import com.gmail.nossr50.util.Misc;
+import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.player.NotificationManager;
+import com.gmail.nossr50.util.player.UserManager;
+import com.gmail.nossr50.util.random.ProbabilityUtil;
+import com.gmail.nossr50.util.skills.RankUtils;
 import org.bukkit.Material;
-import org.bukkit.block.BlockState;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.material.MaterialData;
-import org.bukkit.material.SmoothBrick;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.AdvancedConfig;
-import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.skills.AbilityType;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.datatypes.skills.ToolType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.skills.SkillManager;
-import com.gmail.nossr50.util.EventUtils;
-import com.gmail.nossr50.util.Misc;
-import com.gmail.nossr50.util.Permissions;
-import com.gmail.nossr50.util.player.UserManager;
-import com.gmail.nossr50.util.skills.CombatUtils;
-import com.gmail.nossr50.util.skills.SkillUtils;
+import org.jetbrains.annotations.NotNull;
 
 public class UnarmedManager extends SkillManager {
-    public UnarmedManager(McMMOPlayer mcMMOPlayer) {
-        super(mcMMOPlayer, SkillType.UNARMED);
+    public static final double BERSERK_DMG_MODIFIER = 1.5;
+
+    public UnarmedManager(McMMOPlayer mmoPlayer) {
+        super(mmoPlayer, PrimarySkillType.UNARMED);
     }
 
     public boolean canActivateAbility() {
-        return mcMMOPlayer.getToolPreparationMode(ToolType.FISTS) && Permissions.berserk(getPlayer());
+        return mmoPlayer.getToolPreparationMode(ToolType.FISTS) && Permissions.berserk(getPlayer());
     }
 
-    public boolean canUseIronArm() {
-        return Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.IRON_ARM);
+    public boolean canUseSteelArm() {
+        if (!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.UNARMED_STEEL_ARM_STYLE)) {
+            return false;
+        }
+
+        return Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.UNARMED_STEEL_ARM_STYLE);
     }
 
     public boolean canUseBerserk() {
-        return mcMMOPlayer.getAbilityMode(AbilityType.BERSERK) && Permissions.berserk(getPlayer());
+        return mmoPlayer.getAbilityMode(SuperAbilityType.BERSERK);
     }
 
     public boolean canDisarm(LivingEntity target) {
-        return target instanceof Player && ((Player) target).getItemInHand().getType() != Material.AIR && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.DISARM);
+        if (!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.UNARMED_DISARM)) {
+            return false;
+        }
+
+        return target instanceof Player
+                && ((Player) target).getInventory().getItemInMainHand().getType() != Material.AIR
+                && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.UNARMED_DISARM);
     }
 
     public boolean canDeflect() {
+        if (!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.UNARMED_ARROW_DEFLECT)) {
+            return false;
+        }
+
         Player player = getPlayer();
 
-        return player.getItemInHand().getType() == Material.AIR && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.DEFLECT);
+        return ItemUtils.isUnarmed(player.getInventory().getItemInMainHand())
+                && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.UNARMED_ARROW_DEFLECT);
     }
 
     public boolean canUseBlockCracker() {
-        return Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.BLOCK_CRACKER);
+        if (!RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.UNARMED_BLOCK_CRACKER)) {
+            return false;
+        }
+
+        return Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.UNARMED_BLOCK_CRACKER);
     }
 
-    public boolean blockCrackerCheck(BlockState blockState) {
-        MaterialData data = blockState.getData();
+    public void blockCrackerCheck(@NotNull Block block) {
+        if (!mcMMO.p.getGeneralConfig().isBlockCrackerAllowed()) {
+            return;
+        }
+        if (!ProbabilityUtil.isNonRNGSkillActivationSuccessful(SubSkillType.UNARMED_BLOCK_CRACKER,
+                mmoPlayer)) {
+            return;
+        }
 
-        switch (blockState.getType()) {
-            case SMOOTH_BRICK:
-                if (!Unarmed.blockCrackerSmoothBrick) {
-                    return false;
-                }
-
-                // Yes, this is awkward, but it's the *right* way to do it.
-                SmoothBrick smoothBrick = (SmoothBrick) data;
-
-                if (smoothBrick.getMaterial() != Material.STONE) {
-                    return false;
-                }
-
-                smoothBrick.setMaterial(Material.COBBLESTONE);
-                return true;
-
+        switch (block.getType()) {
+            case STONE_BRICKS:
+                block.setType(Material.CRACKED_STONE_BRICKS);
+                return;
+            case INFESTED_STONE_BRICKS:
+                block.setType(Material.INFESTED_CRACKED_STONE_BRICKS);
+                return;
+            case DEEPSLATE_BRICKS:
+                block.setType(Material.CRACKED_DEEPSLATE_BRICKS);
+                return;
+            case DEEPSLATE_TILES:
+                block.setType(Material.CRACKED_DEEPSLATE_TILES);
+                return;
+            case POLISHED_BLACKSTONE_BRICKS:
+                block.setType(Material.CRACKED_POLISHED_BLACKSTONE_BRICKS);
+                return;
+            case NETHER_BRICKS:
+                block.setType(Material.CRACKED_NETHER_BRICKS);
+                return;
             default:
-                return false;
         }
     }
 
@@ -84,21 +116,43 @@ public class UnarmedManager extends SkillManager {
      * Check for disarm.
      *
      * @param defender The defending player
+     * @deprecated use {@link #disarmCheck(Player, double)} instead; this overload reads the live
+     * attack cooldown, which is unreliable during damage events on Paper 26.1.2+
      */
-    public void disarmCheck(Player defender) {
-        if (SkillUtils.activationSuccessful(SecondaryAbility.DISARM, getPlayer(), getSkillLevel(), activationChance) && !hasIronGrip(defender)) {
+    @Deprecated(forRemoval = true, since = "2.3.000")
+    public void disarmCheck(@NotNull Player defender) {
+        disarmCheck(defender, mmoPlayer.getAttackStrength());
+    }
+
+    /**
+     * Check for disarm.
+     *
+     * @param defender The defending player
+     * @param attackStrengthScale the committed attack strength of the hit, from 0.0 to 1.0
+     */
+    public void disarmCheck(@NotNull Player defender, double attackStrengthScale) {
+        if (isSkillRNGSuccessful(SubSkillType.UNARMED_DISARM, mmoPlayer, attackStrengthScale)
+                && !hasIronGrip(defender)) {
             if (EventUtils.callDisarmEvent(defender).isCancelled()) {
                 return;
             }
 
-            Item item = Misc.dropItem(defender.getLocation(), defender.getItemInHand());
-
-            if (item != null && AdvancedConfig.getInstance().getDisarmProtected()) {
-                item.setMetadata(mcMMO.disarmedItemKey, UserManager.getPlayer(defender).getPlayerMetadata());
+            if (UserManager.getPlayer(defender) == null) {
+                return;
             }
 
-            defender.setItemInHand(new ItemStack(Material.AIR));
-            defender.sendMessage(LocaleLoader.getString("Skills.Disarmed"));
+            final Item item = ItemUtils.spawnItem(getPlayer(), defender.getLocation(),
+                    defender.getInventory().getItemInMainHand(),
+                    ItemSpawnReason.UNARMED_DISARMED_ITEM);
+
+            if (item != null && mcMMO.p.getAdvancedConfig().getDisarmProtected()) {
+                item.setMetadata(MetadataConstants.METADATA_KEY_DISARMED_ITEM,
+                        UserManager.getPlayer(defender).getPlayerMetadata());
+            }
+
+            defender.getInventory().setItemInMainHand(new ItemStack(Material.AIR));
+            NotificationManager.sendPlayerInformation(defender, NotificationType.SUBSKILL_MESSAGE,
+                    "Skills.Disarmed");
         }
     }
 
@@ -106,8 +160,9 @@ public class UnarmedManager extends SkillManager {
      * Check for arrow deflection.
      */
     public boolean deflectCheck() {
-        if (SkillUtils.activationSuccessful(SecondaryAbility.DEFLECT, getPlayer(), getSkillLevel(), activationChance)) {
-            getPlayer().sendMessage(LocaleLoader.getString("Combat.ArrowDeflect"));
+        if (isSkillRNGSuccessful(SubSkillType.UNARMED_ARROW_DEFLECT, mmoPlayer)) {
+            NotificationManager.sendPlayerInformation(getPlayer(),
+                    NotificationType.SUBSKILL_MESSAGE, "Combat.ArrowDeflect");
             return true;
         }
 
@@ -117,24 +172,56 @@ public class UnarmedManager extends SkillManager {
     /**
      * Handle the effects of the Berserk ability
      *
-     * @param target The {@link LivingEntity} being affected by the ability
      * @param damage The amount of damage initially dealt by the event
+     * @deprecated use {@link #berserkDamage(double, double)} instead; this overload reads the
+     * live attack cooldown, which is unreliable during damage events on Paper 26.1.2+
      */
-    public double berserkDamage(LivingEntity target, double damage) {
-        damage = (damage * Unarmed.berserkDamageModifier) - damage;
+    @Deprecated(forRemoval = true, since = "2.3.000")
+    public double berserkDamage(double damage) {
+        return berserkDamage(damage, mmoPlayer.getAttackStrength());
+    }
 
-        return CombatUtils.callFakeDamageEvent(getPlayer(), target, damage);
+    /**
+     * Handle the effects of the Berserk ability
+     *
+     * @param damage The amount of damage initially dealt by the event
+     * @param attackStrengthScale the committed attack strength of the hit, from 0.0 to 1.0
+     * @return the bonus damage granted by Berserk, negative for weak (uncharged) hits
+     */
+    public double berserkDamage(double damage, double attackStrengthScale) {
+        return ((damage * BERSERK_DMG_MODIFIER) * attackStrengthScale) - damage;
     }
 
     /**
      * Handle the effects of the Iron Arm ability
-     *
-     * @param target The {@link LivingEntity} being affected by the ability
      */
-    public double ironArm(LivingEntity target) {
-        double unarmedBonus = Math.min(Unarmed.ironArmMinBonusDamage + (getSkillLevel() / Unarmed.ironArmIncreaseLevel), Unarmed.ironArmMaxBonusDamage);
+    public double calculateSteelArmStyleDamage() {
+        if (ProbabilityUtil.isNonRNGSkillActivationSuccessful(SubSkillType.UNARMED_STEEL_ARM_STYLE,
+                mmoPlayer)) {
+            return getSteelArmStyleDamage();
+        }
 
-        return CombatUtils.callFakeDamageEvent(getPlayer(), target, unarmedBonus);
+        return 0;
+    }
+
+    public double getSteelArmStyleDamage() {
+        double rank = RankUtils.getRank(getPlayer(), SubSkillType.UNARMED_STEEL_ARM_STYLE);
+
+        double bonus = 0;
+
+        if (rank >= 18) {
+            bonus = 1 + rank - 18;
+        }
+
+        double finalBonus = bonus + 0.5 + (rank / 2);
+
+        if (mcMMO.p.getAdvancedConfig().isSteelArmDamageCustom()) {
+            return mcMMO.p.getAdvancedConfig().getSteelArmOverride(
+                    RankUtils.getRank(getPlayer(), SubSkillType.UNARMED_STEEL_ARM_STYLE),
+                    finalBonus);
+        } else {
+            return finalBonus;
+        }
     }
 
     /**
@@ -143,10 +230,15 @@ public class UnarmedManager extends SkillManager {
      * @param defender The defending player
      * @return true if the defender was not disarmed, false otherwise
      */
-    private boolean hasIronGrip(Player defender) {
-        if (!Misc.isNPCEntity(defender) && Permissions.secondaryAbilityEnabled(defender, SecondaryAbility.IRON_GRIP) && SkillUtils.activationSuccessful(SecondaryAbility.IRON_GRIP, defender, skill)) {
-            defender.sendMessage(LocaleLoader.getString("Unarmed.Ability.IronGrip.Defender"));
-            getPlayer().sendMessage(LocaleLoader.getString("Unarmed.Ability.IronGrip.Attacker"));
+    private boolean hasIronGrip(@NotNull Player defender) {
+        if (!Misc.isNPCEntityExcludingVillagers(defender)
+                && Permissions.isSubSkillEnabled(defender, SubSkillType.UNARMED_IRON_GRIP)
+                && isSkillRNGSuccessful(SubSkillType.UNARMED_IRON_GRIP,
+                UserManager.getPlayer(defender))) {
+            NotificationManager.sendPlayerInformation(defender, NotificationType.SUBSKILL_MESSAGE,
+                    "Unarmed.Ability.IronGrip.Defender");
+            NotificationManager.sendPlayerInformation(getPlayer(),
+                    NotificationType.SUBSKILL_MESSAGE, "Unarmed.Ability.IronGrip.Attacker");
 
             return true;
         }

@@ -1,96 +1,133 @@
 package com.gmail.nossr50.commands.skills;
 
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.random.ProbabilityUtil;
+import com.gmail.nossr50.util.skills.RankUtils;
+import com.gmail.nossr50.util.text.TextComponentFactory;
 import java.util.ArrayList;
 import java.util.List;
-
+import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
-
-import com.gmail.nossr50.config.AdvancedConfig;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.Permissions;
 
 public class WoodcuttingCommand extends SkillCommand {
     private String treeFellerLength;
     private String treeFellerLengthEndurance;
     private String doubleDropChance;
+    private String tripleDropChance;
     private String doubleDropChanceLucky;
+    private String tripleDropChanceLucky;
 
     private boolean canTreeFell;
     private boolean canLeafBlow;
     private boolean canDoubleDrop;
+    private boolean canTripleDrop;
+    private boolean canKnockOnWood;
 
     public WoodcuttingCommand() {
-        super(SkillType.WOODCUTTING);
+        super(PrimarySkillType.WOODCUTTING);
     }
 
     @Override
-    protected void dataCalculations(Player player, float skillValue, boolean isLucky) {
+    protected void dataCalculations(Player player, float skillValue) {
+        // DOUBLE DROPS
+        if (canDoubleDrop) {
+            setDoubleDropClassicChanceStrings(player);
+        }
+
+        //Clean Cuts
+        if (canTripleDrop) {
+            String[] tripleDropStrings = ProbabilityUtil.getRNGDisplayValues(mmoPlayer,
+                    SubSkillType.WOODCUTTING_CLEAN_CUTS);
+            tripleDropChance = tripleDropStrings[0];
+            tripleDropChanceLucky = tripleDropStrings[1];
+        }
+
         // TREE FELLER
         if (canTreeFell) {
             String[] treeFellerStrings = calculateLengthDisplayValues(player, skillValue);
             treeFellerLength = treeFellerStrings[0];
             treeFellerLengthEndurance = treeFellerStrings[1];
         }
+    }
 
-        // DOUBLE DROPS
-        if (canDoubleDrop) {
-            String[] doubleDropStrings = calculateAbilityDisplayValues(skillValue, SecondaryAbility.WOODCUTTING_DOUBLE_DROPS, isLucky);
-            doubleDropChance = doubleDropStrings[0];
-            doubleDropChanceLucky = doubleDropStrings[1];
-        }
+    private void setDoubleDropClassicChanceStrings(Player player) {
+        String[] doubleDropStrings = ProbabilityUtil.getRNGDisplayValues(mmoPlayer,
+                SubSkillType.WOODCUTTING_HARVEST_LUMBER);
+        doubleDropChance = doubleDropStrings[0];
+        doubleDropChanceLucky = doubleDropStrings[1];
     }
 
     @Override
     protected void permissionsCheck(Player player) {
-        canTreeFell = Permissions.treeFeller(player);
-        canDoubleDrop = Permissions.secondaryAbilityEnabled(player, SecondaryAbility.WOODCUTTING_DOUBLE_DROPS) && !skill.getDoubleDropsDisabled();
-        canLeafBlow = Permissions.secondaryAbilityEnabled(player, SecondaryAbility.LEAF_BLOWER);
+        canTreeFell = RankUtils.hasUnlockedSubskill(player, SubSkillType.WOODCUTTING_TREE_FELLER)
+                && Permissions.treeFeller(player);
+        canDoubleDrop = !mcMMO.p.getGeneralConfig().getDoubleDropsDisabled(skill)
+                && Permissions.canUseSubSkill(player, SubSkillType.WOODCUTTING_HARVEST_LUMBER)
+                && RankUtils.getRank(player, SubSkillType.WOODCUTTING_HARVEST_LUMBER) >= 1;
+        canTripleDrop = !mcMMO.p.getGeneralConfig().getDoubleDropsDisabled(skill)
+                && Permissions.canUseSubSkill(player, SubSkillType.WOODCUTTING_CLEAN_CUTS);
+        canLeafBlow = Permissions.canUseSubSkill(player, SubSkillType.WOODCUTTING_LEAF_BLOWER);
+        canKnockOnWood = canTreeFell && Permissions.canUseSubSkill(player,
+                SubSkillType.WOODCUTTING_KNOCK_ON_WOOD);
     }
 
     @Override
-    protected List<String> effectsDisplay() {
-        List<String> messages = new ArrayList<String>();
+    protected List<String> statsDisplay(Player player, float skillValue, boolean hasEndurance,
+            boolean isLucky) {
+        List<String> messages = new ArrayList<>();
 
-        if (canTreeFell) {
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Woodcutting.Effect.0"), LocaleLoader.getString("Woodcutting.Effect.1")));
+        if (canDoubleDrop) {
+            messages.add(getStatMessage(SubSkillType.WOODCUTTING_HARVEST_LUMBER, doubleDropChance)
+                    + (isLucky ? LocaleLoader.getString("Perks.Lucky.Bonus", doubleDropChanceLucky)
+                    : ""));
+        }
+
+        if (canTripleDrop) {
+            messages.add(getStatMessage(SubSkillType.WOODCUTTING_CLEAN_CUTS, tripleDropChance)
+                    + (isLucky ? LocaleLoader.getString("Perks.Lucky.Bonus", tripleDropChanceLucky)
+                    : ""));
+        }
+
+        if (canKnockOnWood) {
+            String lootNote;
+
+            if (RankUtils.hasReachedRank(2, player, SubSkillType.WOODCUTTING_KNOCK_ON_WOOD)) {
+                lootNote = LocaleLoader.getString("Woodcutting.SubSkill.KnockOnWood.Loot.Rank2");
+            } else {
+                lootNote = LocaleLoader.getString("Woodcutting.SubSkill.KnockOnWood.Loot.Normal");
+            }
+
+            messages.add(getStatMessage(SubSkillType.WOODCUTTING_KNOCK_ON_WOOD, lootNote));
         }
 
         if (canLeafBlow) {
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Woodcutting.Effect.2"), LocaleLoader.getString("Woodcutting.Effect.3")));
+            messages.add(LocaleLoader.getString("Ability.Generic.Template",
+                    LocaleLoader.getString("Woodcutting.Ability.0"),
+                    LocaleLoader.getString("Woodcutting.Ability.1")));
         }
 
-        if (canDoubleDrop) {
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Woodcutting.Effect.4"), LocaleLoader.getString("Woodcutting.Effect.5")));
+        if (canTreeFell) {
+            messages.add(getStatMessage(SubSkillType.WOODCUTTING_TREE_FELLER, treeFellerLength)
+                    + (hasEndurance ? LocaleLoader.getString("Perks.ActivationTime.Bonus",
+                    treeFellerLengthEndurance) : ""));
         }
 
         return messages;
     }
 
     @Override
-    protected List<String> statsDisplay(Player player, float skillValue, boolean hasEndurance, boolean isLucky) {
-        List<String> messages = new ArrayList<String>();
+    protected List<Component> getTextComponents(Player player) {
+        List<Component> textComponents = new ArrayList<>();
 
-        if (canLeafBlow) {
-            int leafBlowerUnlockLevel = AdvancedConfig.getInstance().getLeafBlowUnlockLevel();
+        TextComponentFactory.appendSubSkillTextComponents(player, textComponents,
+                PrimarySkillType.WOODCUTTING);
 
-            if (skillValue < leafBlowerUnlockLevel) {
-                messages.add(LocaleLoader.getString("Ability.Generic.Template.Lock", LocaleLoader.getString("Woodcutting.Ability.Locked.0", leafBlowerUnlockLevel)));
-            }
-            else {
-                messages.add(LocaleLoader.getString("Ability.Generic.Template", LocaleLoader.getString("Woodcutting.Ability.0"), LocaleLoader.getString("Woodcutting.Ability.1")));
-            }
-        }
-
-        if (canDoubleDrop) {
-            messages.add(LocaleLoader.getString("Woodcutting.Ability.Chance.DDrop", doubleDropChance) + (isLucky ? LocaleLoader.getString("Perks.Lucky.Bonus", doubleDropChanceLucky) : ""));
-        }
-
-        if (canTreeFell) {
-            messages.add(LocaleLoader.getString("Woodcutting.Ability.Length", treeFellerLength) + (hasEndurance ? LocaleLoader.getString("Perks.ActivationTime.Bonus", treeFellerLengthEndurance) : ""));
-        }
-
-        return messages;
+        return textComponents;
     }
+
+
 }

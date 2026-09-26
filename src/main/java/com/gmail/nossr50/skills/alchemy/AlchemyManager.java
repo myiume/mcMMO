@@ -1,99 +1,70 @@
 package com.gmail.nossr50.skills.alchemy;
 
-import java.util.List;
-
-import org.bukkit.inventory.ItemStack;
+import static com.gmail.nossr50.util.text.ConfigStringUtils.getMaterialConfigString;
 
 import com.gmail.nossr50.config.experience.ExperienceConfig;
-import com.gmail.nossr50.config.skills.alchemy.PotionConfig;
+import com.gmail.nossr50.datatypes.experience.XPGainReason;
+import com.gmail.nossr50.datatypes.experience.XPGainSource;
 import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.datatypes.skills.alchemy.PotionStage;
+import com.gmail.nossr50.mcMMO;
 import com.gmail.nossr50.skills.SkillManager;
-import com.gmail.nossr50.util.Permissions;
-import com.gmail.nossr50.util.StringUtils;
+import com.gmail.nossr50.util.skills.RankUtils;
+import java.util.List;
+import org.bukkit.inventory.ItemStack;
 
 public class AlchemyManager extends SkillManager {
-    private final double LUCKY_MODIFIER = 4.0 / 3.0;
+    private static final double LUCKY_MODIFIER = 4.0 / 3.0;
 
-    public AlchemyManager(McMMOPlayer mcMMOPlayer) {
-        super(mcMMOPlayer, SkillType.ALCHEMY);
-    }
-
-    public boolean canCatalysis() {
-        return Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.CATALYSIS);
-    }
-
-    public boolean canConcoctions() {
-        return Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.CONCOCTIONS);
-    }
-
-    public boolean canUseIngredient(ItemStack item) {
-        for (ItemStack ingredient : getIngredients()) {
-            if (item.isSimilar(ingredient)) {
-                return true;
-            }
-        }
-        return false;
+    public AlchemyManager(McMMOPlayer mmoPlayer) {
+        super(mmoPlayer, PrimarySkillType.ALCHEMY);
     }
 
     public int getTier() {
-        for (Alchemy.Tier tier : Alchemy.Tier.values()) {
-            if (getSkillLevel() >= tier.getLevel()) {
-                return tier.toNumerical();
-            }
-        }
-
-        return 0;
+        return RankUtils.getRank(getPlayer(), SubSkillType.ALCHEMY_CONCOCTIONS);
     }
 
     public List<ItemStack> getIngredients() {
-        switch (Alchemy.Tier.fromNumerical(getTier())) {
-            case EIGHT:
-                return PotionConfig.getInstance().concoctionsIngredientsTierEight;
-            case SEVEN:
-                return PotionConfig.getInstance().concoctionsIngredientsTierSeven;
-            case SIX:
-                return PotionConfig.getInstance().concoctionsIngredientsTierSix;
-            case FIVE:
-                return PotionConfig.getInstance().concoctionsIngredientsTierFive;
-            case FOUR:
-                return PotionConfig.getInstance().concoctionsIngredientsTierFour;
-            case THREE:
-                return PotionConfig.getInstance().concoctionsIngredientsTierThree;
-            case TWO:
-                return PotionConfig.getInstance().concoctionsIngredientsTierTwo;
-            default:
-                return PotionConfig.getInstance().concoctionsIngredientsTierOne;
-        }
+        return mcMMO.p.getPotionConfig().getIngredients(getTier());
     }
 
     public String getIngredientList() {
-        StringBuilder list = new StringBuilder();
+        final StringBuilder list = new StringBuilder();
 
-        for (ItemStack ingredient : getIngredients()) {
-            String string = StringUtils.getPrettyItemString(ingredient.getType()) + (ingredient.getDurability() != 0 ? ":" + ingredient.getDurability() : "");
-            if (string.equals("Long Grass:2")) {
-                string = "Fern";
-            }
-            else if (string.equals("Raw Fish:3")) {
-                string = "Pufferfish";
-            }
-
-            list.append(", " + string);
+        for (final ItemStack ingredient : getIngredients()) {
+            list.append(", ").append(getMaterialConfigString(ingredient.getType()));
         }
+
         return list.substring(2);
     }
 
-    public double getBrewSpeed() {
-        return Alchemy.calculateBrewSpeed(getSkillLevel());
+    public double calculateBrewSpeed(boolean isLucky) {
+        final int skillLevel = getSkillLevel();
+        final int unlockLevel = RankUtils.getUnlockLevel(SubSkillType.ALCHEMY_CATALYSIS);
+
+        if (skillLevel < unlockLevel) {
+            return Alchemy.catalysisMinSpeed;
+        }
+
+        final double speedRange = Alchemy.catalysisMaxSpeed - Alchemy.catalysisMinSpeed;
+        final double rampProgress = (double) (skillLevel - unlockLevel)
+                / (Alchemy.catalysisMaxBonusLevel - unlockLevel);
+        final double curveSpeed = Math.min(Alchemy.catalysisMaxSpeed,
+                Alchemy.catalysisMinSpeed + speedRange * rampProgress);
+
+        return curveSpeed * (isLucky ? LUCKY_MODIFIER : 1.0);
     }
 
-    public double getBrewSpeedLucky() {
-        return LUCKY_MODIFIER * Alchemy.calculateBrewSpeed(getSkillLevel());
-    }
-
-    public void handlePotionBrewSuccesses(int amount) {
-        applyXpGain((float) (ExperienceConfig.getInstance().getPotionXP() * amount));
+    /**
+     * Handle the XP gain for a successful potion brew.
+     *
+     * @param potionStage The potion stage, this is used to determine the XP gain.
+     * @param amount The amount of potions brewed.
+     */
+    public void handlePotionBrewSuccesses(PotionStage potionStage, int amount) {
+        applyXpGain((float) (ExperienceConfig.getInstance().getPotionXP(potionStage) * amount),
+                XPGainReason.PVE, XPGainSource.PASSIVE);
     }
 }

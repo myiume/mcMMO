@@ -1,195 +1,191 @@
 package com.gmail.nossr50.skills.fishing;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.bukkit.ChatColor;
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.Sound;
-import org.bukkit.WeatherType;
-import org.bukkit.World;
-import org.bukkit.block.Biome;
-import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
-import org.bukkit.enchantments.Enchantment;
-import org.bukkit.entity.Creature;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
-import org.bukkit.entity.Fish;
-import org.bukkit.entity.Item;
-import org.bukkit.entity.LivingEntity;
-import org.bukkit.entity.Player;
-import org.bukkit.entity.Sheep;
-import org.bukkit.entity.Skeleton;
-import org.bukkit.entity.Skeleton.SkeletonType;
-import org.bukkit.entity.TNTPrimed;
-import org.bukkit.entity.ThrownPotion;
-import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.material.Wool;
-import org.bukkit.potion.Potion;
-import org.bukkit.potion.PotionType;
-import org.bukkit.util.Vector;
-
-import com.gmail.nossr50.mcMMO;
-import com.gmail.nossr50.config.AdvancedConfig;
-import com.gmail.nossr50.config.Config;
+import com.gmail.nossr50.api.FakeBlockBreakEventType;
+import com.gmail.nossr50.api.ItemSpawnReason;
 import com.gmail.nossr50.config.experience.ExperienceConfig;
-import com.gmail.nossr50.config.treasure.TreasureConfig;
+import com.gmail.nossr50.config.treasure.FishingTreasureConfig;
+import com.gmail.nossr50.datatypes.experience.XPGainReason;
+import com.gmail.nossr50.datatypes.experience.XPGainSource;
+import com.gmail.nossr50.datatypes.interactions.NotificationType;
 import com.gmail.nossr50.datatypes.player.McMMOPlayer;
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
 import com.gmail.nossr50.datatypes.treasure.EnchantmentTreasure;
 import com.gmail.nossr50.datatypes.treasure.FishingTreasure;
+import com.gmail.nossr50.datatypes.treasure.FishingTreasureBook;
 import com.gmail.nossr50.datatypes.treasure.Rarity;
 import com.gmail.nossr50.datatypes.treasure.ShakeTreasure;
 import com.gmail.nossr50.events.skills.fishing.McMMOPlayerFishingTreasureEvent;
+import com.gmail.nossr50.events.skills.fishing.McMMOPlayerMasterAnglerEvent;
 import com.gmail.nossr50.events.skills.fishing.McMMOPlayerShakeEvent;
-import com.gmail.nossr50.events.skills.secondaryabilities.SecondaryAbilityWeightedActivationCheckEvent;
 import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.runnables.skills.KrakenAttackTask;
+import com.gmail.nossr50.mcMMO;
+import com.gmail.nossr50.runnables.skills.MasterAnglerTask;
 import com.gmail.nossr50.skills.SkillManager;
-import com.gmail.nossr50.skills.fishing.Fishing.Tier;
 import com.gmail.nossr50.util.BlockUtils;
 import com.gmail.nossr50.util.EventUtils;
 import com.gmail.nossr50.util.ItemUtils;
 import com.gmail.nossr50.util.Misc;
 import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.adapter.BiomeAdapter;
+import com.gmail.nossr50.util.player.NotificationManager;
+import com.gmail.nossr50.util.random.ProbabilityUtil;
 import com.gmail.nossr50.util.skills.CombatUtils;
+import com.gmail.nossr50.util.skills.RankUtils;
 import com.gmail.nossr50.util.skills.SkillUtils;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.bukkit.ChatColor;
+import org.bukkit.Material;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Boat;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.FishHook;
+import org.bukkit.entity.Item;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
+import org.bukkit.entity.Sheep;
+import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.SkullMeta;
+import org.bukkit.util.BoundingBox;
+import org.bukkit.util.Vector;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class FishingManager extends SkillManager {
-    private final long FISHING_COOLDOWN_SECONDS = 1000L;
+    protected long lastFishCaughtTimestamp = 0L;
+    protected long lastWarned = 0L;
+    private BoundingBox lastFishingBoundingBox;
+    private boolean sameTarget;
+    private boolean fishingTooOften;
+    private int fishCaughtCounter = 1;
+    private final int masterAnglerMinWaitLowerBound;
+    private final int masterAnglerMaxWaitLowerBound;
 
-    private int fishingTries = 0;
-    private long fishingTimestamp = 0L;
-    private Location fishingTarget;
-    private Item fishingCatch;
-    private Location hookLocation;
+    public FishingManager(McMMOPlayer mmoPlayer) {
+        super(mmoPlayer, PrimarySkillType.FISHING);
+        // Ticks for minWait and maxWait never go below this value
+        int bonusCapMin = mcMMO.p.getAdvancedConfig().getFishingReductionMinWaitCap();
+        int bonusCapMax = mcMMO.p.getAdvancedConfig().getFishingReductionMaxWaitCap();
 
-    public FishingManager(McMMOPlayer mcMMOPlayer) {
-        super(mcMMOPlayer, SkillType.FISHING);
+        this.masterAnglerMinWaitLowerBound = Math.max(bonusCapMin, 0);
+        this.masterAnglerMaxWaitLowerBound = Math.max(bonusCapMax,
+                masterAnglerMinWaitLowerBound + 40);
     }
 
     public boolean canShake(Entity target) {
-        return target instanceof LivingEntity && getSkillLevel() >= Tier.ONE.getLevel() && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.SHAKE);
+        return target instanceof LivingEntity && RankUtils.hasUnlockedSubskill(getPlayer(),
+                SubSkillType.FISHING_SHAKE)
+                && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.FISHING_SHAKE);
     }
 
     public boolean canMasterAngler() {
-        return getSkillLevel() >= AdvancedConfig.getInstance().getMasterAnglerUnlockLevel() && Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.MASTER_ANGLER);
+        return getSkillLevel() >= RankUtils.getUnlockLevel(SubSkillType.FISHING_MASTER_ANGLER)
+                && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.FISHING_MASTER_ANGLER);
     }
 
-    public boolean unleashTheKraken() {
-        return unleashTheKraken(true);
-    }
-
-    private boolean unleashTheKraken(boolean forceSpawn) {
-        if (!forceSpawn && (fishingTries < AdvancedConfig.getInstance().getKrakenTriesBeforeRelease() || fishingTries <= Misc.getRandom().nextInt(200))) {
-            return false;
-        }
-
-        Player player = getPlayer();
-        World world = player.getWorld();
-
-        player.setPlayerWeather(WeatherType.DOWNFALL);
-
-        Entity vehicle = player.getVehicle();
-
-        if (vehicle != null && vehicle.getType() == EntityType.BOAT) {
-            vehicle.eject();
-            vehicle.remove();
-        }
-
-        player.teleport(player.getTargetBlock(null, 100).getLocation(), TeleportCause.PLUGIN);
-
-        String unleashMessage = AdvancedConfig.getInstance().getPlayerUnleashMessage();
-
-        if (!unleashMessage.isEmpty()) {
-            player.sendMessage(unleashMessage);
-        }
-
-        Location location = player.getLocation();
-        boolean globalEffectsEnabled = AdvancedConfig.getInstance().getKrakenGlobalEffectsEnabled();
-
-        if (globalEffectsEnabled) {
-            world.strikeLightningEffect(location);
-            world.strikeLightningEffect(location);
-            world.strikeLightningEffect(location);
-
-            world.playSound(location, Sound.GHAST_SCREAM, Misc.GHAST_VOLUME, Misc.getGhastPitch());
-            mcMMO.p.getServer().broadcastMessage(ChatColor.RED + AdvancedConfig.getInstance().getServerUnleashMessage().replace("(PLAYER)", player.getDisplayName()));
-        }
-        else {
-            world.createExplosion(location.getX(), location.getY(), location.getZ(), 0F, false, false);
-            world.createExplosion(location.getX(), location.getY(), location.getZ(), 0F, false, false);
-            world.createExplosion(location.getX(), location.getY(), location.getZ(), 0F, false, false);
-
-            player.playSound(location, Sound.GHAST_SCREAM, Misc.GHAST_VOLUME, Misc.getGhastPitch());
-        }
-
-        if (player.getItemInHand().getType() == Material.FISHING_ROD) {
-            player.setItemInHand(null);
-        }
-
-        Creature kraken = (Creature) world.spawnEntity(player.getEyeLocation(), (Misc.getRandom().nextInt(100) == 0 ? EntityType.CHICKEN : EntityType.SQUID));
-        kraken.setCustomName(AdvancedConfig.getInstance().getKrakenName());
-
-        if (!kraken.isValid()) {
-            int attackInterval = AdvancedConfig.getInstance().getKrakenAttackInterval() * Misc.TICK_CONVERSION_FACTOR;
-            new KrakenAttackTask(kraken, player, player.getLocation()).runTaskTimer(mcMMO.p, attackInterval, attackInterval);
-
-            if (!forceSpawn) {
-                fishingTries = 0;
-            }
-
-            return true;
-        }
-
-        kraken.setMaxHealth(AdvancedConfig.getInstance().getKrakenHealth());
-        kraken.setHealth(kraken.getMaxHealth());
-
-        int attackInterval = AdvancedConfig.getInstance().getKrakenAttackInterval() * Misc.TICK_CONVERSION_FACTOR;
-        new KrakenAttackTask(kraken, player).runTaskTimer(mcMMO.p, attackInterval, attackInterval);
-
-        if (!forceSpawn) {
-            fishingTries = 0;
-        }
-
-        return true;
-    }
-
-    public boolean exploitPrevention() {
-        if (!AdvancedConfig.getInstance().getKrakenEnabled()) {
-            return false;
-        }
-
-        Block targetBlock = getPlayer().getTargetBlock(BlockUtils.getTransparentBlocks(), 100);
-
-        if (!targetBlock.isLiquid()) {
-            return false;
-        }
-
+    /**
+     * {@return whether the player has had a previous catch within the last second}
+     */
+    public boolean isFishingTooOften() {
         long currentTime = System.currentTimeMillis();
-        boolean hasFished = (currentTime < fishingTimestamp + FISHING_COOLDOWN_SECONDS);
+        boolean hasFishedRecently = lastFishCaughtTimestamp + 1000 > currentTime;
 
-        fishingTries = hasFished ? fishingTries + 1 : Math.max(fishingTries - 1, 0);
-        fishingTimestamp = currentTime;
+        if (hasFishedRecently && currentTime > lastWarned + 1000) {
+            getPlayer().sendMessage(LocaleLoader.getString("Fishing.Scared"));
+            lastWarned = currentTime;
+        }
 
-        Location targetLocation = targetBlock.getLocation();
-        boolean sameTarget = (fishingTarget != null && fishingTarget.equals(targetLocation));
+        lastFishCaughtTimestamp = currentTime;
+        fishingTooOften = hasFishedRecently;
 
-        fishingTries = sameTarget ? fishingTries + 1 : Math.max(fishingTries - 1, 0);
-        fishingTarget = targetLocation;
+        return hasFishedRecently;
+    }
 
-        return unleashTheKraken(false);
+    /**
+     * {@return the verdict of the most recent {@link #isFishingTooOften()} check}
+     * Unlike {@link #isFishingTooOften()} this does not update the catch timestamp, so
+     * handlers running later in the same event chain can re-read the verdict without every
+     * catch being treated as a repeat.
+     */
+    public boolean wasFishingTooOften() {
+        return fishingTooOften;
+    }
+
+    public void processExploiting(Vector centerOfCastVector) {
+        BoundingBox newCastBoundingBox = makeBoundingBox(centerOfCastVector);
+        this.sameTarget = lastFishingBoundingBox != null && lastFishingBoundingBox.overlaps(
+                newCastBoundingBox);
+
+        if (this.sameTarget) {
+            fishCaughtCounter++;
+        } else {
+            fishCaughtCounter = 1;
+        }
+
+        //If the new bounding box does not intersect with the old one, then update our bounding box reference
+        if (!this.sameTarget) {
+            lastFishingBoundingBox = newCastBoundingBox;
+        }
+
+        if (fishCaughtCounter + 1 == ExperienceConfig.getInstance()
+                .getFishingExploitingOptionOverFishLimit()) {
+            getPlayer().sendMessage(LocaleLoader.getString("Fishing.LowResourcesTip",
+                    ExperienceConfig.getInstance().getFishingExploitingOptionMoveRange()));
+        }
+    }
+
+    /**
+     * Determines if the player is exploiting fishing by checking if they have caught
+     * more fish than the configured limit without moving their fishing spot.
+     * This method relies on internal state to determine if the player is exploiting fishing,
+     * and the centerOfCastVector parameter is no longer used and will be removed in
+     * a future version.
+     *
+     * @param centerOfCastVector unused
+     * @deprecated since 2.2.050, the parameter is no longer used and will be removed in
+     * a future version. The method now relies on internal state to determine if the player
+     * is exploiting fishing.
+     * @return true if the player is exploiting fishing, false otherwise
+     */
+    @Deprecated(forRemoval = true, since = "2.2.050")
+    public boolean isExploitingFishing(Vector centerOfCastVector) {
+        return this.sameTarget && fishCaughtCounter >= ExperienceConfig.getInstance()
+                .getFishingExploitingOptionOverFishLimit();
+    }
+
+    /**
+     * Determines if the player is exploiting fishing by checking if they have caught
+     * more fish than the configured limit without moving their fishing spot.
+     *
+     * @return true if the player is exploiting fishing, false otherwise
+     */
+    public boolean isExploitingFishing() {
+        return this.sameTarget && fishCaughtCounter >= ExperienceConfig.getInstance()
+                .getFishingExploitingOptionOverFishLimit();
+    }
+
+    public static BoundingBox makeBoundingBox(Vector centerOfCastVector) {
+        int exploitingRange = ExperienceConfig.getInstance().getFishingExploitingOptionMoveRange();
+        return BoundingBox.of(centerOfCastVector,
+                (double) exploitingRange / 2, 1,
+                (double) exploitingRange / 2);
+    }
+
+    public void setFishingTarget() {
+        getPlayer().getTargetBlock(BlockUtils.getTransparentBlocks(), 100);
     }
 
     public boolean canIceFish(Block block) {
-        if (getSkillLevel() < AdvancedConfig.getInstance().getIceFishingUnlockLevel()) {
+        if (getSkillLevel() < RankUtils.getUnlockLevel(SubSkillType.FISHING_ICE_FISHING)) {
             return false;
         }
 
@@ -198,20 +194,18 @@ public class FishingManager extends SkillManager {
         }
 
         // Make sure this is a body of water, not just a block of ice.
-        Biome biome = block.getBiome();
-        boolean isFrozenBiome = (biome == Biome.FROZEN_OCEAN || biome == Biome.FROZEN_RIVER || biome == Biome.TAIGA || biome == Biome.TAIGA_HILLS || biome == Biome.ICE_PLAINS || biome == Biome.ICE_MOUNTAINS);
-
-        if (!isFrozenBiome && (block.getRelative(BlockFace.DOWN, 3).getType() != Material.STATIONARY_WATER)) {
+        if (!BiomeAdapter.ICE_BIOMES.contains(block.getBiome())
+                && (block.getRelative(BlockFace.DOWN, 3).getType() != Material.WATER)) {
             return false;
         }
 
         Player player = getPlayer();
 
-        if (!Permissions.secondaryAbilityEnabled(getPlayer(), SecondaryAbility.ICE_FISHING)) {
+        if (!Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.FISHING_ICE_FISHING)) {
             return false;
         }
 
-        return EventUtils.simulateBlockBreak(block, player, false);
+        return EventUtils.simulateBlockBreak(block, player, FakeBlockBreakEventType.FAKE);
     }
 
     /**
@@ -220,153 +214,297 @@ public class FishingManager extends SkillManager {
      * @return the loot tier
      */
     public int getLootTier() {
-        int skillLevel = getSkillLevel();
-
-        for (Tier tier : Tier.values()) {
-            if (skillLevel >= tier.getLevel()) {
-                return tier.toNumerical();
-            }
-        }
-
-        return 0;
+        return RankUtils.getRank(getPlayer(), SubSkillType.FISHING_TREASURE_HUNTER);
     }
 
-    /**
-     * Gets the Shake Mob probability
-     *
-     * @return Shake Mob probability
-     */
-    public double getShakeProbability() {
-        int skillLevel = getSkillLevel();
+    public double getShakeChance() {
+        return mcMMO.p.getAdvancedConfig().getShakeChance(
+                RankUtils.getRank(mmoPlayer.getPlayer(), SubSkillType.FISHING_SHAKE));
+    }
 
-        for (Tier tier : Tier.values()) {
-            if (skillLevel >= tier.getLevel()) {
-                return tier.getShakeChance();
-            }
-        }
-
-        return 0.0;
+    protected int getVanillaXPBoostModifier() {
+        return mcMMO.p.getAdvancedConfig().getFishingVanillaXPModifier(getLootTier());
     }
 
     /**
      * Handle the Fisherman's Diet ability
      *
-     * @param rankChange     The # of levels to change rank for the food
      * @param eventFoodLevel The initial change in hunger from the event
-     *
      * @return the modified change in hunger for the event
      */
-    public int handleFishermanDiet(int rankChange, int eventFoodLevel) {
-        return SkillUtils.handleFoodSkills(getPlayer(), skill, eventFoodLevel, Fishing.fishermansDietRankLevel1, Fishing.fishermansDietMaxLevel, rankChange);
+    public int handleFishermanDiet(int eventFoodLevel) {
+        return SkillUtils.handleFoodSkills(getPlayer(), eventFoodLevel,
+                SubSkillType.FISHING_FISHERMANS_DIET);
     }
 
-    public void iceFishing(Fish hook, Block block) {
+    public void iceFishing(FishHook hook, Block block, @Nullable EquipmentSlot fishingHand) {
         // Make a hole
-        block.setType(Material.STATIONARY_WATER);
+        block.setType(Material.WATER);
 
         for (int x = -1; x <= 1; x++) {
             for (int z = -1; z <= 1; z++) {
                 Block relative = block.getRelative(x, 0, z);
 
                 if (relative.getType() == Material.ICE) {
-                    relative.setType(Material.STATIONARY_WATER);
+                    relative.setType(Material.WATER);
                 }
             }
         }
 
         // Recast in the new spot
-        EventUtils.callFakeFishEvent(getPlayer(), hook);
+        EventUtils.callFakeFishEvent(getPlayer(), hook, fishingHand);
     }
 
-    public void masterAngler(Fish hook) {
-        Player player = getPlayer();
-        Location location = hook.getLocation();
-        Biome biome = location.getBlock().getBiome();
-        double biteChance = hook.getBiteChance();
-
-        hookLocation = location;
-
-        if (biome == Biome.RIVER || biome == Biome.OCEAN) {
-            biteChance = biteChance * AdvancedConfig.getInstance().getMasterAnglerBiomeModifier();
-        }
-
-        if (player.isInsideVehicle() && player.getVehicle().getType() == EntityType.BOAT) {
-            biteChance = biteChance * AdvancedConfig.getInstance().getMasterAnglerBoatModifier();
-        }
-
-        hook.setBiteChance(Math.min(biteChance, 1.0));
+    public void masterAngler(@NotNull FishHook hook, int lureLevel) {
+        mcMMO.p.getFoliaLib().getScheduler()
+                .runAtEntityLater(hook, new MasterAnglerTask(hook, this, lureLevel),
+                        1); //We run later to get the lure bonus applied
     }
 
     /**
-     * Process the results from a successful fishing trip
+     * Processes master angler Reduced tick time on fish hook, etc
+     *
+     * @param fishHook target fish hook
+     */
+    public void processMasterAngler(@NotNull FishHook fishHook, int lureLevel) {
+        int maxWaitTicks = fishHook.getMaxWaitTime();
+        int minWaitTicks = fishHook.getMinWaitTime();
+
+        int masterAnglerRank = RankUtils.getRank(mmoPlayer, SubSkillType.FISHING_MASTER_ANGLER);
+        int convertedLureBonus = 0;
+
+        //This avoids a Minecraft bug where lure levels above 3 break fishing
+        if (lureLevel > 0) {
+            fishHook.setApplyLure(false);
+            convertedLureBonus = lureLevel * 100;
+        }
+
+        boolean boatBonus = isInBoat();
+        int minWaitReduction = getMasterAnglerTickMinWaitReduction(masterAnglerRank, boatBonus);
+        int maxWaitReduction = getMasterAnglerTickMaxWaitReduction(masterAnglerRank, boatBonus,
+                convertedLureBonus);
+
+        int reducedMinWaitTime = getReducedTicks(minWaitTicks, minWaitReduction,
+                masterAnglerMinWaitLowerBound);
+        int reducedMaxWaitTime = getReducedTicks(maxWaitTicks, maxWaitReduction,
+                masterAnglerMaxWaitLowerBound);
+
+        boolean badValuesFix = false;
+
+        //If we find bad values correct it
+        if (reducedMaxWaitTime < reducedMinWaitTime) {
+            reducedMaxWaitTime = reducedMinWaitTime + 100;
+            badValuesFix = true;
+        }
+
+        final McMMOPlayerMasterAnglerEvent event =
+                new McMMOPlayerMasterAnglerEvent(mmoPlayer, reducedMinWaitTime,
+                        reducedMaxWaitTime, this);
+        mcMMO.p.getServer().getPluginManager().callEvent(event);
+
+        if (event.isCancelled()) {
+            return;
+        }
+
+        reducedMaxWaitTime = event.getReducedMaxWaitTime();
+        reducedMinWaitTime = event.getReducedMinWaitTime();
+
+        if (mmoPlayer.isDebugMode()) {
+            mmoPlayer.getPlayer().sendMessage(ChatColor.GOLD + "Master Angler Debug");
+
+            if (badValuesFix) {
+                mmoPlayer.getPlayer()
+                        .sendMessage(ChatColor.RED + "Bad values were applied and corrected," +
+                                " check your configs, minWaitLowerBound wait should never be lower than min wait.");
+            }
+
+            mmoPlayer.getPlayer().sendMessage(
+                    "ALLOW STACK WITH LURE: " + fishHook.getApplyLure());
+            mmoPlayer.getPlayer().sendMessage("MIN TICK REDUCTION: " + minWaitReduction);
+            mmoPlayer.getPlayer().sendMessage("MAX TICK REDUCTION: " + maxWaitReduction);
+            mmoPlayer.getPlayer().sendMessage("BOAT BONUS: " + boatBonus);
+
+            if (boatBonus) {
+                mmoPlayer.getPlayer()
+                        .sendMessage("BOAT MAX TICK REDUCTION: " + maxWaitReduction);
+                mmoPlayer.getPlayer()
+                        .sendMessage("BOAT MIN TICK REDUCTION: " + maxWaitReduction);
+            }
+
+            mmoPlayer.getPlayer().sendMessage("");
+
+            mmoPlayer.getPlayer()
+                    .sendMessage(ChatColor.DARK_AQUA + "BEFORE MASTER ANGLER WAS APPLIED");
+            mmoPlayer.getPlayer().sendMessage("Original Max Wait Ticks: " + maxWaitTicks);
+            mmoPlayer.getPlayer().sendMessage("Original Min Wait Ticks: " + minWaitTicks);
+            mmoPlayer.getPlayer().sendMessage("");
+
+            mmoPlayer.getPlayer()
+                    .sendMessage(ChatColor.DARK_AQUA + "AFTER MASTER ANGLER WAS APPLIED");
+            mmoPlayer.getPlayer().sendMessage("Current Max Wait Ticks: " + reducedMaxWaitTime);
+            mmoPlayer.getPlayer().sendMessage("Current Min Wait Ticks: " + reducedMinWaitTime);
+
+            mmoPlayer.getPlayer().sendMessage("");
+
+            mmoPlayer.getPlayer()
+                    .sendMessage(ChatColor.DARK_AQUA + "Caps / Limits (edit in advanced.yml)");
+            mmoPlayer.getPlayer().sendMessage("Lowest possible minWaitLowerBound wait ticks "
+                    + masterAnglerMinWaitLowerBound);
+            mmoPlayer.getPlayer().sendMessage(
+                    "Lowest possible min wait ticks " + masterAnglerMaxWaitLowerBound);
+        }
+
+        fishHook.setMaxWaitTime(reducedMaxWaitTime);
+        fishHook.setMinWaitTime(reducedMinWaitTime);
+    }
+
+    public int getReducedTicks(int ticks, int totalBonus, int tickBounds) {
+        return Math.max(tickBounds, ticks - totalBonus);
+    }
+
+    public boolean isInBoat() {
+        return mmoPlayer.getPlayer().isInsideVehicle() && mmoPlayer.getPlayer()
+                .getVehicle() instanceof Boat;
+    }
+
+    public int getMasterAnglerTickMaxWaitReduction(int masterAnglerRank, boolean boatBonus,
+            int emulatedLureBonus) {
+        int totalBonus =
+                mcMMO.p.getAdvancedConfig().getFishingReductionMaxWaitTicks() * masterAnglerRank;
+
+        if (boatBonus) {
+            totalBonus += getFishingBoatMaxWaitReduction();
+        }
+
+        totalBonus += emulatedLureBonus;
+
+        return totalBonus;
+    }
+
+    public int getMasterAnglerTickMinWaitReduction(int masterAnglerRank, boolean boatBonus) {
+        int totalBonus =
+                mcMMO.p.getAdvancedConfig().getFishingReductionMinWaitTicks() * masterAnglerRank;
+
+        if (boatBonus) {
+            totalBonus += getFishingBoatMinWaitReduction();
+        }
+
+        return totalBonus;
+    }
+
+    public int getFishingBoatMinWaitReduction() {
+        return mcMMO.p.getAdvancedConfig().getFishingBoatReductionMinWaitTicks();
+    }
+
+    public int getFishingBoatMaxWaitReduction() {
+        return mcMMO.p.getAdvancedConfig().getFishingBoatReductionMaxWaitTicks();
+    }
+
+    public boolean isMagicHunterEnabled() {
+        return RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.FISHING_MAGIC_HUNTER)
+                && RankUtils.hasUnlockedSubskill(getPlayer(), SubSkillType.FISHING_TREASURE_HUNTER)
+                && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.FISHING_MAGIC_HUNTER)
+                && Permissions.isSubSkillEnabled(getPlayer(), SubSkillType.FISHING_TREASURE_HUNTER);
+    }
+
+    /**
+     * Process the results from a successful fishing trip.
      *
      * @param fishingCatch The {@link Item} initially caught
+     * @param fishingHand The hand associated with the fish event, when available
      */
-    public void handleFishing(Item fishingCatch) {
-        this.fishingCatch = fishingCatch;
+    public void processFishing(@NotNull Item fishingCatch, @Nullable EquipmentSlot fishingHand) {
+        int fishXp = ExperienceConfig.getInstance()
+                .getXp(PrimarySkillType.FISHING, fishingCatch.getItemStack().getType());
         int treasureXp = 0;
+        ItemStack treasureDrop = null;
         Player player = getPlayer();
         FishingTreasure treasure = null;
+        boolean fishingSucceeds = false;
 
-        if (Config.getInstance().getFishingDropsEnabled() && Permissions.secondaryAbilityEnabled(player, SecondaryAbility.FISHING_TREASURE_HUNTER)) {
-            treasure = getFishingTreasure();
-            this.fishingCatch = null;
+        if (mcMMO.p.getGeneralConfig().getFishingDropsEnabled() && Permissions.isSubSkillEnabled(
+                player, SubSkillType.FISHING_TREASURE_HUNTER)) {
+            treasure = getFishingTreasure(fishingHand);
         }
 
         if (treasure != null) {
-            player.sendMessage(LocaleLoader.getString("Fishing.Ability.TH.ItemFound"));
+            if (treasure instanceof FishingTreasureBook) {
+                treasureDrop = ItemUtils.createEnchantBook((FishingTreasureBook) treasure);
+            } else {
+                treasureDrop = treasure.getDrop().clone(); // Not cloning is bad, m'kay?
 
-            ItemStack treasureDrop = treasure.getDrop().clone(); // Not cloning is bad, m'kay?
-            Map<Enchantment, Integer> enchants = new HashMap<Enchantment, Integer>();
-
-            if (Permissions.secondaryAbilityEnabled(player, SecondaryAbility.MAGIC_HUNTER) && ItemUtils.isEnchantable(treasureDrop)) {
-                enchants = handleMagicHunter(treasureDrop);
             }
+            Map<Enchantment, Integer> enchants = new HashMap<>();
+            McMMOPlayerFishingTreasureEvent event;
 
-            McMMOPlayerFishingTreasureEvent event = EventUtils.callFishingTreasureEvent(player, treasureDrop, treasure.getXp(), enchants);
+            /*
+             * Books get some special treatment
+             */
+            if (treasure instanceof FishingTreasureBook) {
+                //Skip the magic hunter stuff
+                if (treasureDrop.getItemMeta() != null) {
+                    enchants.putAll(treasureDrop.getItemMeta().getEnchants());
+                }
+
+                event = EventUtils.callFishingTreasureEvent(mmoPlayer, treasureDrop,
+                        treasure.getXp(), enchants);
+            } else {
+                if (isMagicHunterEnabled() && ItemUtils.isEnchantable(treasureDrop)) {
+                    enchants = processMagicHunter(treasureDrop);
+                }
+
+                event = EventUtils.callFishingTreasureEvent(mmoPlayer, treasureDrop,
+                        treasure.getXp(), enchants);
+            }
 
             if (!event.isCancelled()) {
                 treasureDrop = event.getTreasure();
                 treasureXp = event.getXp();
-            }
-            else {
+
+                // Drop the original catch at the feet of the player and set the treasure as the real catch
+                if (treasureDrop != null) {
+                    fishingSucceeds = true;
+                    boolean enchanted = false;
+
+                    if (treasure instanceof FishingTreasureBook) {
+                        enchanted = true;
+                    } else if (!enchants.isEmpty()) {
+                        treasureDrop.addUnsafeEnchantments(enchants);
+                        enchanted = true;
+                    }
+
+                    if (enchanted) {
+                        NotificationManager.sendPlayerInformation(player,
+                                NotificationType.SUBSKILL_MESSAGE, "Fishing.Ability.TH.MagicFound");
+                    }
+
+                }
+            } else {
                 treasureDrop = null;
                 treasureXp = 0;
             }
-
-            // Drop the original catch at the feet of the player and set the treasure as the real catch
-            if (treasureDrop != null) {
-                boolean enchanted = false;
-
-                if (!enchants.isEmpty()) {
-                    treasureDrop.addUnsafeEnchantments(enchants);
-                    enchanted = true;
-                }
-
-                if (enchanted) {
-                    player.sendMessage(LocaleLoader.getString("Fishing.Ability.TH.MagicFound"));
-                }
-
-                fishingCatch.setItemStack(treasureDrop);
-            }
         }
 
-        applyXpGain(ExperienceConfig.getInstance().getFishingBaseXP() + treasureXp);
+        if (fishingSucceeds) {
+            if (mcMMO.p.getGeneralConfig().getFishingExtraFish()) {
+                ItemUtils.spawnItem(getPlayer(), player.getEyeLocation(),
+                        fishingCatch.getItemStack(), ItemSpawnReason.FISHING_EXTRA_FISH);
+            }
+
+            fishingCatch.setItemStack(treasureDrop);
+        }
+
+        applyXpGain(fishXp + treasureXp, XPGainReason.PVE, XPGainSource.SELF);
     }
 
     /**
      * Handle the vanilla XP boost for Fishing
      *
      * @param experience The amount of experience initially awarded by the event
-     *
      * @return the modified event damage
      */
     public int handleVanillaXpBoost(int experience) {
         return experience * getVanillaXpMultiplier();
-    }
-
-    public Location getHookLocation() {
-        return hookLocation;
     }
 
     /**
@@ -374,12 +512,9 @@ public class FishingManager extends SkillManager {
      *
      * @param target The {@link LivingEntity} affected by the ability
      */
-    public void shakeCheck(LivingEntity target) {
-        fishingTries--; // Because autoclicking to shake is OK.
-
-        SecondaryAbilityWeightedActivationCheckEvent activationEvent = new SecondaryAbilityWeightedActivationCheckEvent(getPlayer(), SecondaryAbility.SHAKE, getShakeProbability() / activationChance);
-        mcMMO.p.getServer().getPluginManager().callEvent(activationEvent);
-        if ((activationEvent.getChance() * activationChance) > Misc.getRandom().nextInt(activationChance)) {
+    public void shakeCheck(@NotNull LivingEntity target) {
+        if (ProbabilityUtil.isStaticSkillRNGSuccessful(PrimarySkillType.FISHING, mmoPlayer,
+                getShakeChance())) {
             List<ShakeTreasure> possibleDrops = Fishing.findPossibleDrops(target);
 
             if (possibleDrops == null || possibleDrops.isEmpty()) {
@@ -395,41 +530,61 @@ public class FishingManager extends SkillManager {
 
             // Extra processing depending on the mob and drop type
             switch (target.getType()) {
+                case PLAYER:
+                    Player targetPlayer = (Player) target;
+
+                    switch (drop.getType()) {
+                        case PLAYER_HEAD:
+                            ItemUtils.setItemDamage(drop, 3);
+                            SkullMeta skullMeta = (SkullMeta) drop.getItemMeta();
+                            skullMeta.setOwningPlayer(targetPlayer);
+                            drop.setItemMeta(skullMeta);
+                            break;
+
+                        case BEDROCK:
+                            if (FishingTreasureConfig.getInstance().getInventoryStealEnabled()) {
+                                PlayerInventory inventory = targetPlayer.getInventory();
+                                int length = inventory.getContents().length;
+                                int slot = Misc.getRandom().nextInt(length);
+                                drop = inventory.getItem(slot);
+
+                                if (drop == null) {
+                                    break;
+                                }
+
+                                if (FishingTreasureConfig.getInstance().getInventoryStealStacks()) {
+                                    inventory.setItem(slot, null);
+                                } else {
+                                    inventory.setItem(slot,
+                                            (drop.getAmount() > 1) ? new ItemStack(drop.getType(),
+                                                    drop.getAmount() - 1) : null);
+                                    drop.setAmount(1);
+                                }
+                            }
+                            break;
+
+                        default:
+                            break;
+                    }
+                    break;
+
                 case SHEEP:
                     Sheep sheep = (Sheep) target;
 
-                    if (drop.getType() == Material.WOOL) {
+                    if (drop.getType().name().endsWith("WOOL")) {
                         if (sheep.isSheared()) {
                             return;
                         }
-
-                        drop = new Wool(sheep.getColor()).toItemStack(drop.getAmount());
                         sheep.setSheared(true);
                     }
                     break;
-
-                case SKELETON:
-                    if (((Skeleton) target).getSkeletonType() == SkeletonType.WITHER) {
-                        switch (drop.getType()) {
-                            case SKULL_ITEM:
-                                drop.setDurability((short) 1);
-                                break;
-
-                            case ARROW:
-                                drop.setType(Material.COAL);
-                                break;
-
-                            default:
-                                break;
-                        }
-                    }
-                    break;
-
                 default:
                     break;
             }
 
-            McMMOPlayerShakeEvent shakeEvent = new McMMOPlayerShakeEvent(getPlayer(), drop);
+            final McMMOPlayerShakeEvent shakeEvent =
+                    new McMMOPlayerShakeEvent(getPlayer(), drop);
+            mcMMO.p.getServer().getPluginManager().callEvent(shakeEvent);
 
             drop = shakeEvent.getDrop();
 
@@ -437,9 +592,13 @@ public class FishingManager extends SkillManager {
                 return;
             }
 
-            Misc.dropItem(target.getLocation(), drop);
-            CombatUtils.dealDamage(target, Math.max(target.getMaxHealth() / 4, 1)); // Make it so you can shake a mob no more than 4 times.
-            applyXpGain(ExperienceConfig.getInstance().getFishingShakeXP());
+            ItemUtils.spawnItem(getPlayer(), target.getLocation(), drop,
+                    ItemSpawnReason.FISHING_SHAKE_TREASURE);
+            // Make it so you can shake a mob no more than 4 times.
+            double dmg = Math.min(Math.max(target.getMaxHealth() / 4, 1), 10);
+            CombatUtils.safeDealDamage(target, dmg, getPlayer());
+            applyXpGain(ExperienceConfig.getInstance().getFishingShakeXP(), XPGainReason.PVE,
+                    XPGainSource.SELF);
         }
     }
 
@@ -448,20 +607,25 @@ public class FishingManager extends SkillManager {
      *
      * @return The {@link FishingTreasure} found, or null if no treasure was found.
      */
-    private FishingTreasure getFishingTreasure() {
+    private @Nullable FishingTreasure getFishingTreasure(@Nullable EquipmentSlot fishingHand) {
         double diceRoll = Misc.getRandom().nextDouble() * 100;
+        ItemStack fishingRod = getFishingRodFromHand(fishingHand);
+        int luck = fishingRod != null ? fishingRod.getEnchantmentLevel(
+                mcMMO.p.getEnchantmentMapper().getLuckOfTheSea()) : 0;
+
+        // Rather than subtracting luck (and causing a minimum 3% chance for every drop), scale by luck.
+        diceRoll *= (1.0 - luck * mcMMO.p.getGeneralConfig().getFishingLureModifier() / 100);
+
         FishingTreasure treasure = null;
 
         for (Rarity rarity : Rarity.values()) {
-            double dropRate = TreasureConfig.getInstance().getItemDropRate(getLootTier(), rarity);
+            double dropRate = FishingTreasureConfig.getInstance()
+                    .getItemDropRate(getLootTier(), rarity);
 
             if (diceRoll <= dropRate) {
-                if (rarity == Rarity.TRAP) {
-                    handleTraps();
-                    break;
-                }
 
-                List<FishingTreasure> fishingTreasures = TreasureConfig.getInstance().fishingRewards.get(rarity);
+                List<FishingTreasure> fishingTreasures = FishingTreasureConfig.getInstance().fishingRewards.get(
+                        rarity);
 
                 if (fishingTreasures.isEmpty()) {
                     return null;
@@ -482,11 +646,7 @@ public class FishingManager extends SkillManager {
         short maxDurability = treasureDrop.getType().getMaxDurability();
 
         if (maxDurability > 0) {
-            treasureDrop.setDurability((short) (Misc.getRandom().nextInt(maxDurability)));
-        }
-
-        if (treasureDrop.getAmount() > 1) {
-            treasureDrop.setAmount(Misc.getRandom().nextInt(treasureDrop.getAmount()) + 1);
+            ItemUtils.setItemDamage(treasureDrop, Misc.getRandom().nextInt(maxDurability));
         }
 
         treasure.setDrop(treasureDrop);
@@ -494,58 +654,31 @@ public class FishingManager extends SkillManager {
         return treasure;
     }
 
-    private void handleTraps() {
-        Player player = getPlayer();
-
-        if (Permissions.trapsBypass(player)) {
-            return;
-        }
-
-        if (Misc.getRandom().nextBoolean()) {
-            player.sendMessage(LocaleLoader.getString("Fishing.Ability.TH.Boom"));
-
-            TNTPrimed tnt = (TNTPrimed) player.getWorld().spawnEntity(fishingCatch.getLocation(), EntityType.PRIMED_TNT);
-            fishingCatch.setPassenger(tnt);
-
-            Vector velocity = fishingCatch.getVelocity();
-            double magnitude = velocity.length();
-            fishingCatch.setVelocity(velocity.multiply((magnitude + 1) / magnitude));
-
-            tnt.setMetadata(mcMMO.tntsafeMetadataKey, mcMMO.metadataValue);
-            tnt.setFuseTicks(3 * Misc.TICK_CONVERSION_FACTOR);
-        }
-        else {
-            player.sendMessage(LocaleLoader.getString("Fishing.Ability.TH.Poison"));
-
-            ThrownPotion thrownPotion = player.getWorld().spawn(fishingCatch.getLocation(), ThrownPotion.class);
-            thrownPotion.setItem(new Potion(PotionType.POISON).splash().toItemStack(1));
-
-            fishingCatch.setPassenger(thrownPotion);
-        }
-    }
-
     /**
      * Process the Magic Hunter ability
      *
      * @param treasureDrop The {@link ItemStack} to enchant
-     *
-     * @return true if the item has been enchanted
      */
-    private Map<Enchantment, Integer> handleMagicHunter(ItemStack treasureDrop) {
-        Map<Enchantment, Integer> enchants = new HashMap<Enchantment, Integer>();
+    private Map<Enchantment, Integer> processMagicHunter(@NotNull ItemStack treasureDrop) {
+        Map<Enchantment, Integer> enchants = new HashMap<>();
         List<EnchantmentTreasure> fishingEnchantments = null;
 
         double diceRoll = Misc.getRandom().nextDouble() * 100;
 
         for (Rarity rarity : Rarity.values()) {
-            if (rarity == Rarity.TRAP || rarity == Rarity.RECORD) {
-                continue;
-            }
 
-            double dropRate = TreasureConfig.getInstance().getEnchantmentDropRate(getLootTier(), rarity);
+            double dropRate = FishingTreasureConfig.getInstance()
+                    .getEnchantmentDropRate(getLootTier(), rarity);
 
             if (diceRoll <= dropRate) {
-                fishingEnchantments = TreasureConfig.getInstance().fishingEnchantments.get(rarity);
+                // Make sure enchanted books always get some kind of enchantment.  --hoorigan
+                if (treasureDrop.getType() == Material.ENCHANTED_BOOK) {
+                    diceRoll = dropRate + 1;
+                    continue;
+                }
+
+                fishingEnchantments = FishingTreasureConfig.getInstance().fishingEnchantments.get(
+                        rarity);
                 break;
             }
 
@@ -557,7 +690,7 @@ public class FishingManager extends SkillManager {
         }
 
         List<Enchantment> validEnchantments = getPossibleEnchantments(treasureDrop);
-        List<EnchantmentTreasure> possibleEnchants = new ArrayList<EnchantmentTreasure>();
+        List<EnchantmentTreasure> possibleEnchants = new ArrayList<>();
 
         for (EnchantmentTreasure enchantmentTreasure : fishingEnchantments) {
             if (validEnchantments.contains(enchantmentTreasure.getEnchantment())) {
@@ -574,10 +707,24 @@ public class FishingManager extends SkillManager {
 
         int specificChance = 1;
 
+        outer:
         for (EnchantmentTreasure enchantmentTreasure : possibleEnchants) {
             Enchantment possibleEnchantment = enchantmentTreasure.getEnchantment();
 
-            if (treasureDrop.getItemMeta().hasConflictingEnchant(possibleEnchantment) || Misc.getRandom().nextInt(specificChance) != 0) {
+            if (!mcMMO.p.getGeneralConfig().getFishingAllowConflictingEnchants()) {
+                final ItemMeta meta = treasureDrop.getItemMeta();
+                if (meta != null && meta.hasConflictingEnchant(possibleEnchantment)) {
+                    continue;
+                }
+
+                for (final Enchantment existingEnchantment : enchants.keySet()) {
+                    if (existingEnchantment.conflictsWith(possibleEnchantment)) {
+                        continue outer;
+                    }
+                }
+            }
+
+            if (Misc.getRandom().nextInt(specificChance) != 0) {
                 continue;
             }
 
@@ -596,7 +743,7 @@ public class FishingManager extends SkillManager {
             return Fishing.ENCHANTABLE_CACHE.get(dropType);
         }
 
-        List<Enchantment> possibleEnchantments = new ArrayList<Enchantment>();
+        List<Enchantment> possibleEnchantments = new ArrayList<>();
 
         for (Enchantment enchantment : Enchantment.values()) {
             if (enchantment.canEnchantItem(treasureDrop)) {
@@ -614,14 +761,34 @@ public class FishingManager extends SkillManager {
      * @return the vanilla XP multiplier
      */
     private int getVanillaXpMultiplier() {
-        int skillLevel = getSkillLevel();
+        return getVanillaXPBoostModifier();
+    }
 
-        for (Tier tier : Tier.values()) {
-            if (skillLevel >= tier.getLevel()) {
-                return tier.getVanillaXPBoostModifier();
-            }
+    public int getMasterAnglerMinWaitLowerBound() {
+        return masterAnglerMinWaitLowerBound;
+    }
+
+    public int getMasterAnglerMaxWaitLowerBound() {
+        return masterAnglerMaxWaitLowerBound;
+    }
+
+    private @Nullable ItemStack getFishingRodFromHand(@Nullable EquipmentSlot fishingHand) {
+        if (fishingHand == EquipmentSlot.HAND) {
+            return getFishingRodOrNull(getPlayer().getInventory().getItemInMainHand());
         }
 
-        return 0;
+        if (fishingHand == EquipmentSlot.OFF_HAND) {
+            return getFishingRodOrNull(getPlayer().getInventory().getItemInOffHand());
+        }
+
+        return null;
+    }
+
+    private @Nullable ItemStack getFishingRodOrNull(@Nullable ItemStack itemStack) {
+        if (itemStack != null && itemStack.getType() == Material.FISHING_ROD) {
+            return itemStack;
+        }
+
+        return null;
     }
 }

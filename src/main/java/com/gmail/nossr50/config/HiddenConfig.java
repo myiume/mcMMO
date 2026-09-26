@@ -1,20 +1,17 @@
 package com.gmail.nossr50.config;
 
-import org.bukkit.configuration.file.YamlConfiguration;
-
 import com.gmail.nossr50.mcMMO;
+import java.io.InputStreamReader;
+import org.bukkit.configuration.file.YamlConfiguration;
 
 public class HiddenConfig {
     private static HiddenConfig instance;
-    private static String fileName;
-    private static YamlConfiguration config;
-    private static boolean chunkletsEnabled;
-    private static int conversionRate;
-    private static boolean useEnchantmentBuffs;
-    private static boolean resendChunksAfterBlockAbility;
+    private final String fileName;
+    private YamlConfiguration config;
+    private boolean useEnchantmentBuffs;
 
     public HiddenConfig(String fileName) {
-        HiddenConfig.fileName = fileName;
+        this.fileName = fileName;
         load();
     }
 
@@ -27,28 +24,15 @@ public class HiddenConfig {
     }
 
     public void load() {
-        if (mcMMO.p.getResource(fileName) != null) {
-            config = YamlConfiguration.loadConfiguration(mcMMO.p.getResource(fileName));
-            chunkletsEnabled = config.getBoolean("Options.Chunklets", true);
-            conversionRate = config.getInt("Options.ConversionRate", 1);
+        InputStreamReader reader = mcMMO.p.getResourceAsReader(fileName);
+        if (reader != null) {
+            config = YamlConfiguration.loadConfiguration(reader);
             useEnchantmentBuffs = config.getBoolean("Options.EnchantmentBuffs", true);
-            resendChunksAfterBlockAbility = config.getBoolean("Options.RefreshChunks", false);
         }
     }
 
-    public boolean getChunkletsEnabled() {
-        return chunkletsEnabled;
-    }
-
-    public int getConversionRate() {
-        return conversionRate;
-    }
 
     public boolean useEnchantmentBuffs() {
         return useEnchantmentBuffs;
-    }
-
-    public boolean resendChunksAfterBlockAbility() {
-        return resendChunksAfterBlockAbility;
     }
 }

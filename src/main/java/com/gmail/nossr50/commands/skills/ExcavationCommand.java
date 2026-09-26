@@ -1,14 +1,16 @@
 package com.gmail.nossr50.commands.skills;
 
+import com.gmail.nossr50.datatypes.skills.PrimarySkillType;
+import com.gmail.nossr50.datatypes.skills.SubSkillType;
+import com.gmail.nossr50.locale.LocaleLoader;
+import com.gmail.nossr50.skills.excavation.ExcavationManager;
+import com.gmail.nossr50.util.Permissions;
+import com.gmail.nossr50.util.skills.RankUtils;
+import com.gmail.nossr50.util.text.TextComponentFactory;
 import java.util.ArrayList;
 import java.util.List;
-
+import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
-
-import com.gmail.nossr50.datatypes.skills.SecondaryAbility;
-import com.gmail.nossr50.datatypes.skills.SkillType;
-import com.gmail.nossr50.locale.LocaleLoader;
-import com.gmail.nossr50.util.Permissions;
 
 public class ExcavationCommand extends SkillCommand {
     private String gigaDrillBreakerLength;
@@ -18,14 +20,14 @@ public class ExcavationCommand extends SkillCommand {
     private boolean canTreasureHunt;
 
     public ExcavationCommand() {
-        super(SkillType.EXCAVATION);
+        super(PrimarySkillType.EXCAVATION);
     }
 
     @Override
-    protected void dataCalculations(Player player, float skillValue, boolean isLucky) {
+    protected void dataCalculations(Player player, float skillValue) {
         // GIGA DRILL BREAKER
         if (canGigaDrill) {
-            String gigaDrillStrings[] = calculateLengthDisplayValues(player, skillValue);
+            String[] gigaDrillStrings = calculateLengthDisplayValues(player, skillValue);
             gigaDrillBreakerLength = gigaDrillStrings[0];
             gigaDrillBreakerLengthEndurance = gigaDrillStrings[1];
         }
@@ -33,33 +35,45 @@ public class ExcavationCommand extends SkillCommand {
 
     @Override
     protected void permissionsCheck(Player player) {
-        canGigaDrill = Permissions.gigaDrillBreaker(player);
-        canTreasureHunt = Permissions.secondaryAbilityEnabled(player, SecondaryAbility.EXCAVATION_TREASURE_HUNTER);
+        canGigaDrill = Permissions.gigaDrillBreaker(player) && RankUtils.hasUnlockedSubskill(player,
+                SubSkillType.EXCAVATION_GIGA_DRILL_BREAKER);
+        canTreasureHunt = Permissions.canUseSubSkill(player, SubSkillType.EXCAVATION_ARCHAEOLOGY);
     }
 
     @Override
-    protected List<String> effectsDisplay() {
-        List<String> messages = new ArrayList<String>();
+    protected List<String> statsDisplay(Player player, float skillValue, boolean hasEndurance,
+            boolean isLucky) {
+        List<String> messages = new ArrayList<>();
+
+        ExcavationManager excavationManager = mmoPlayer.getExcavationManager();
 
         if (canGigaDrill) {
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Excavation.Effect.0"), LocaleLoader.getString("Excavation.Effect.1")));
+            messages.add(getStatMessage(SubSkillType.EXCAVATION_GIGA_DRILL_BREAKER,
+                    gigaDrillBreakerLength)
+                    + (hasEndurance ? LocaleLoader.getString("Perks.ActivationTime.Bonus",
+                    gigaDrillBreakerLengthEndurance) : ""));
+
+            //messages.add(LocaleLoader.getString("Excavation.Effect.Length", gigaDrillBreakerLength) + (hasEndurance ? LocaleLoader.getString("Perks.ActivationTime.Bonus", gigaDrillBreakerLengthEndurance) : ""));
         }
 
-        if (canTreasureHunt) {
-            messages.add(LocaleLoader.getString("Effects.Template", LocaleLoader.getString("Excavation.Effect.2"), LocaleLoader.getString("Excavation.Effect.3")));
+        if (Permissions.canUseSubSkill(player, SubSkillType.EXCAVATION_ARCHAEOLOGY)) {
+            messages.add(getStatMessage(false, false, SubSkillType.EXCAVATION_ARCHAEOLOGY,
+                    percent.format(excavationManager.getArchaelogyExperienceOrbChance() / 100.0D)));
+            messages.add(getStatMessage(true, false, SubSkillType.EXCAVATION_ARCHAEOLOGY,
+                    String.valueOf(excavationManager.getExperienceOrbsReward())));
+
         }
 
         return messages;
     }
 
     @Override
-    protected List<String> statsDisplay(Player player, float skillValue, boolean hasEndurance, boolean isLucky) {
-        List<String> messages = new ArrayList<String>();
+    protected List<Component> getTextComponents(Player player) {
+        List<Component> textComponents = new ArrayList<>();
 
-        if (canGigaDrill) {
-            messages.add(LocaleLoader.getString("Excavation.Effect.Length", gigaDrillBreakerLength) + (hasEndurance ? LocaleLoader.getString("Perks.ActivationTime.Bonus", gigaDrillBreakerLengthEndurance) : ""));
-        }
+        TextComponentFactory.appendSubSkillTextComponents(player, textComponents,
+                PrimarySkillType.EXCAVATION);
 
-        return messages;
+        return textComponents;
     }
 }
